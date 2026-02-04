@@ -1,4 +1,5 @@
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
+
 using namespace llvm;
 
 Target &getTheLampTarget() {
@@ -8,5 +9,5 @@ Target &getTheLampTarget() {
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeLampTargetInfo() {
   RegisterTarget<Triple::UnknownArch, /*HasJIT=*/false>
-      X(getTheLAMPTarget(), "lamp", "LampVM Target", "LAMP");
+      X(getTheLampTarget(), "lamp", "LampVM Target", "Lamp");
 }
