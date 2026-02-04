@@ -1,5 +1,6 @@
 class LampReg<string n, int enc> : Register<n> {
-    let HWEncoding = enc;
+  let HWEncoding = enc;
+  let Namespace = "Lamp";
 }
 
 def R0  : LampReg<"r0",  0>;
@@ -32,8 +33,8 @@ def R26 : LampReg<"r26", 26>;
 def R27 : LampReg<"r27", 27>;
 def R28 : LampReg<"r28", 28>;
 def R29 : LampReg<"r29", 29>;
-def R30 : LampReg<"r30", 30>; // SP (reserved in C++ side)
-def R31 : LampReg<"r31", 31>; // reserved
+def R30 : LampReg<"r30", 30>;
+def R31 : LampReg<"r31", 31>;
 
 def GPR : RegisterClass<"Lamp", [i32], 32,
   (add
@@ -43,6 +44,7 @@ def GPR : RegisterClass<"Lamp", [i32], 32,
     R24, R25, R26, R27, R28, R29, R30, R31
   )
 >;
+
 def PtrRC : RegisterClass<"Lamp", [i32], 32, (add
   R0, R1, R2, R3, R4, R5, R6, R7,
   R8, R9, R10, R11, R12, R13, R14, R15,

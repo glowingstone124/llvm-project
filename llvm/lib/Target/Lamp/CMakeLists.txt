@@ -1,7 +1,10 @@
 set(LLVM_TARGET_DEFINITIONS Lamp.td)
 
+tablegen(LLVM LampGenCallingConv.inc  -gen-callingconv)
 tablegen(LLVM LampGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM LampGenInstrInfo.inc    -gen-instr-info)
+tablegen(LLVM LampGenSubtargetInfo.inc -gen-subtarget)
+tablegen(LLVM LampGenAsmWriter.inc -gen-asm-writer)
 tablegen(LLVM LampGenDAGISel.inc      -gen-dag-isel)
 
 add_public_tablegen_target(LampCommonTableGen)
