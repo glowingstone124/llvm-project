@@ -11,6 +11,7 @@ class LampTargetMachine;
 namespace LampISD {
 enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
+  CALL,
   RET,
 };
 } // namespace LampISD
@@ -23,6 +24,9 @@ public:
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
   const char *getTargetNodeName(unsigned Opcode) const override;
+
+  SDValue LowerCall(CallLoweringInfo &CLI,
+                    SmallVectorImpl<SDValue> &InVals) const override;
 
   SDValue LowerFormalArguments(SDValue Chain,
                                CallingConv::ID CallConv,

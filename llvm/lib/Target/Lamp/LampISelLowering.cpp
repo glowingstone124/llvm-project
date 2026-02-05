@@ -16,6 +16,10 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
                                        const LampSubtarget &STI)
     : TargetLowering(TM, STI) {
   addRegisterClass(MVT::i32, &Lamp::GPRRegClass);
+  MVT PtrVT = getPointerTy(TM.createDataLayout());
+  setOperationAction(ISD::GlobalAddress, PtrVT, Custom);
+  setOperationAction(ISD::ExternalSymbol, PtrVT, Custom);
+  setOperationAction(ISD::BlockAddress, PtrVT, Custom);
   computeRegisterProperties(STI.getRegisterInfo());
   setStackPointerRegisterToSaveRestore(Lamp::R30);
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -23,16 +27,124 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
 
 SDValue LampTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  switch (Op.getOpcode()) {
+  case ISD::GlobalAddress: {
+    auto *GA = cast<GlobalAddressSDNode>(Op);
+    return DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i32);
+  }
+  case ISD::ExternalSymbol: {
+    auto *ES = cast<ExternalSymbolSDNode>(Op);
+    return DAG.getTargetExternalSymbol(ES->getSymbol(), MVT::i32);
+  }
+  case ISD::BlockAddress: {
+    auto *BA = cast<BlockAddressSDNode>(Op);
+    return DAG.getTargetBlockAddress(BA->getBlockAddress(), MVT::i32);
+  }
+  default:
+    break;
+  }
   return SDValue();
 }
 
 const char *LampTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
+  case LampISD::CALL:
+    return "LampISD::CALL";
   case LampISD::RET:
     return "LampISD::RET";
   default:
     return nullptr;
   }
+}
+
+SDValue LampTargetLowering::LowerCall(
+    CallLoweringInfo &CLI, SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG = CLI.DAG;
+  SDLoc &DL = CLI.DL;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
+  SDValue Chain = CLI.Chain;
+  SDValue Callee = CLI.Callee;
+  CallingConv::ID CallConv = CLI.CallConv;
+  bool IsVarArg = CLI.IsVarArg;
+
+  CLI.IsTailCall = false;
+  if (IsVarArg)
+    report_fatal_error("Lamp vararg call is not supported yet");
+
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
+                 *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(Outs, CC_Lamp);
+
+  unsigned NumBytes = CCInfo.getStackSize();
+  if (NumBytes != 0)
+    report_fatal_error("Lamp stack call arguments are not supported yet");
+
+  SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+
+  for (unsigned I = 0; I < ArgLocs.size(); ++I) {
+    CCValAssign &VA = ArgLocs[I];
+    SDValue Arg = OutVals[I];
+
+    if (VA.getLocInfo() == CCValAssign::SExt)
+      Arg = DAG.getNode(ISD::SIGN_EXTEND, DL, VA.getLocVT(), Arg);
+    else if (VA.getLocInfo() == CCValAssign::ZExt)
+      Arg = DAG.getNode(ISD::ZERO_EXTEND, DL, VA.getLocVT(), Arg);
+    else if (VA.getLocInfo() == CCValAssign::AExt)
+      Arg = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), Arg);
+
+    if (VA.isRegLoc()) {
+      RegsToPass.push_back({VA.getLocReg(), Arg});
+      continue;
+    }
+
+    report_fatal_error("Lamp stack-passed call args are not supported yet");
+  }
+
+  for (const auto &[Reg, Val] : RegsToPass) {
+    Chain = DAG.getCopyToReg(Chain, DL, Reg, Val);
+  }
+
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
+    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32);
+  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
+    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32);
+  else
+    report_fatal_error("Lamp only supports direct calls currently");
+
+  SDVTList NodeTys = DAG.getVTList(MVT::Other);
+  SDValue ArgRegs[8] = {
+      DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32),
+      DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32),
+      DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32)};
+  for (const auto &[Reg, Val] : RegsToPass) {
+    if (Reg >= Lamp::R0 && Reg <= Lamp::R7)
+      ArgRegs[Reg - Lamp::R0] = DAG.getRegister(Reg, Val.getValueType());
+  }
+
+  SmallVector<SDValue, 16> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+  for (SDValue V : ArgRegs)
+    Ops.push_back(V);
+
+  Chain = DAG.getNode(LampISD::CALL, DL, NodeTys, Ops);
+
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState RetCCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), RVLocs,
+                    *DAG.getContext());
+  RetCCInfo.AnalyzeCallResult(Ins, RetCC_Lamp);
+
+  for (CCValAssign &VA : RVLocs) {
+    SDValue Ret = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT());
+    Chain = Ret.getValue(1);
+    InVals.push_back(Ret.getValue(0));
+  }
+
+  return Chain;
 }
 
 SDValue LampTargetLowering::LowerFormalArguments(
@@ -76,11 +188,15 @@ SDValue LampTargetLowering::LowerReturn(
   CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
   CCInfo.AnalyzeReturn(Outs, RetCC_Lamp);
 
+  SDValue Glue;
   for (unsigned i = 0; i < RVLocs.size(); ++i) {
-    Chain = DAG.getCopyToReg(Chain, DL, RVLocs[i].getLocReg(), OutVals[i]);
+    Chain = DAG.getCopyToReg(Chain, DL, RVLocs[i].getLocReg(), OutVals[i], Glue);
+    Glue = Chain.getValue(1);
   }
 
   SmallVector<SDValue, 4> RetOps;
   RetOps.push_back(Chain);
+  if (Glue.getNode())
+    RetOps.push_back(Glue);
   return DAG.getNode(LampISD::RET, DL, MVT::Other, RetOps);
 }

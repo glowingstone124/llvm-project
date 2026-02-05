@@ -11,7 +11,10 @@
 namespace {
 class LampMCAsmInfo : public llvm::MCAsmInfoELF {
 public:
-  LampMCAsmInfo() = default;
+  LampMCAsmInfo() {
+    setUseIntegratedAssembler(false);
+    setParseInlineAsmUsingAsmParser(false);
+  }
 };
 } // namespace
 

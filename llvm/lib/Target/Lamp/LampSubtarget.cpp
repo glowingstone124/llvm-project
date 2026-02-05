@@ -16,4 +16,6 @@ LampSubtarget::LampSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
     : LampGenSubtargetInfo(TT, CPU, CPU, FS),
       InstrInfo(*this),
       FrameLowering(*this),
-      TLInfo(TM, *this) {}
+      TLInfo(TM, *this) {
+  TSInfo = std::make_unique<SelectionDAGTargetInfo>();
+}

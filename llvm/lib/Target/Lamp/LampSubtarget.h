@@ -4,7 +4,9 @@
 #include "LampFrameLowering.h"
 #include "LampISelLowering.h"
 #include "LampInstrInfo.h"
+#include "llvm/CodeGen/SelectionDAGTargetInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include <memory>
 
 #define GET_SUBTARGETINFO_HEADER
 #include "LampGenSubtargetInfo.inc"
@@ -17,6 +19,7 @@ class LampSubtarget : public LampGenSubtargetInfo {
   LampInstrInfo InstrInfo;
   LampFrameLowering FrameLowering;
   LampTargetLowering TLInfo;
+  std::unique_ptr<const SelectionDAGTargetInfo> TSInfo;
 
   void anchor();
 
@@ -35,6 +38,9 @@ public:
   }
   const LampTargetLowering *getTargetLowering() const override {
     return &TLInfo;
+  }
+  const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
+    return TSInfo.get();
   }
 };
 

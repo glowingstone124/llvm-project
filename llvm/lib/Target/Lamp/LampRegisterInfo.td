@@ -35,6 +35,7 @@ def R28 : LampReg<"r28", 28>;
 def R29 : LampReg<"r29", 29>;
 def R30 : LampReg<"r30", 30>;
 def R31 : LampReg<"r31", 31>;
+def FLAGS : LampReg<"flags", 32>;
 
 def GPR : RegisterClass<"Lamp", [i32], 32,
   (add
