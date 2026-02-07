@@ -262,3 +262,19 @@ def : Pat<(sra i32:$lhs, i32:$rhs), (SAR GPR:$lhs, GPR:$rhs)>;
 def : Pat<(shl i32:$lhs, simm32:$imm), (SHLI GPR:$lhs, simm32:$imm)>;
 def : Pat<(srl i32:$lhs, simm32:$imm), (SHRI GPR:$lhs, simm32:$imm)>;
 def : Pat<(i32 simm32:$imm), (MOVI simm32:$imm)>;
+
+def : Pat<(seteq i32:$lhs, i32:$rhs),
+          (XORI
+            (SHRI
+              (OR
+                (SUB GPR:$lhs, GPR:$rhs),
+                (SUB (i32 0), (SUB GPR:$lhs, GPR:$rhs))),
+              31),
+            1)>;
+
+def : Pat<(setne i32:$lhs, i32:$rhs),
+          (SHRI
+            (OR
+              (SUB GPR:$lhs, GPR:$rhs),
+              (SUB (i32 0), (SUB GPR:$lhs, GPR:$rhs))),
+            31)>;

@@ -23,9 +23,11 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   setOperationAction(ISD::BlockAddress, PtrVT, Custom);
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
   setOperationAction(ISD::ATOMIC_CMP_SWAP, MVT::i32, Custom);
-  setOperationAction(ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS, MVT::i32, Custom);
+  setOperationAction(ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS, MVT::i32, Expand);
   setOperationAction(ISD::ATOMIC_SWAP, MVT::i32, Custom);
   setOperationAction(ISD::ATOMIC_LOAD_ADD, MVT::i32, Custom);
+  setOperationAction(ISD::ATOMIC_LOAD, MVT::i32, Custom);
+  setOperationAction(ISD::ATOMIC_STORE, MVT::i32, Custom);
   computeRegisterProperties(STI.getRegisterInfo());
   setStackPointerRegisterToSaveRestore(Lamp::R30);
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -63,6 +65,20 @@ SDValue LampTargetLowering::LowerOperation(SDValue Op,
     return DAG.getMemIntrinsicNode(LampISD::XADD, DL, VTs, Ops,
                                    AN->getMemoryVT(), AN->getMemOperand());
   }
+  case ISD::ATOMIC_LOAD: {
+    auto *AN = cast<AtomicSDNode>(Op.getNode());
+    SDVTList VTs = DAG.getVTList(Op.getValueType(), MVT::Other);
+    SDValue Ops[] = {AN->getChain(), AN->getBasePtr()};
+    return DAG.getMemIntrinsicNode(LampISD::LDAR, DL, VTs, Ops,
+                                   AN->getMemoryVT(), AN->getMemOperand());
+  }
+  case ISD::ATOMIC_STORE: {
+    auto *AN = cast<AtomicSDNode>(Op.getNode());
+    SDVTList VTs = DAG.getVTList(MVT::Other);
+    SDValue Ops[] = {AN->getChain(), AN->getVal(), AN->getBasePtr()};
+    return DAG.getMemIntrinsicNode(LampISD::STLR, DL, VTs, Ops,
+                                   AN->getMemoryVT(), AN->getMemOperand());
+  }
   case ISD::ATOMIC_CMP_SWAP: {
     auto *AN = cast<AtomicSDNode>(Op.getNode());
     SDVTList VTs = DAG.getVTList(Op.getValueType(), MVT::Other);
@@ -70,18 +86,6 @@ SDValue LampTargetLowering::LowerOperation(SDValue Op,
                      AN->getOperand(3)};
     return DAG.getMemIntrinsicNode(LampISD::CAS, DL, VTs, Ops,
                                    AN->getMemoryVT(), AN->getMemOperand());
-  }
-  case ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS: {
-    auto *AN = cast<AtomicSDNode>(Op.getNode());
-    SDVTList VTs = DAG.getVTList(Op.getValueType(), MVT::Other);
-    SDValue Ops[] = {AN->getOperand(0), AN->getOperand(1), AN->getOperand(2),
-                     AN->getOperand(3)};
-    SDValue CAS = DAG.getMemIntrinsicNode(LampISD::CAS, DL, VTs, Ops,
-                                          AN->getMemoryVT(), AN->getMemOperand());
-    SDValue Success =
-        DAG.getSetCC(DL, MVT::i1, CAS.getValue(0), AN->getOperand(2), ISD::SETEQ);
-    SDValue Results[] = {CAS.getValue(0), Success, CAS.getValue(1)};
-    return DAG.getMergeValues(Results, DL);
   }
   default:
     break;
@@ -103,6 +107,10 @@ const char *LampTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "LampISD::XADD";
   case LampISD::XCHG:
     return "LampISD::XCHG";
+  case LampISD::LDAR:
+    return "LampISD::LDAR";
+  case LampISD::STLR:
+    return "LampISD::STLR";
   default:
     return nullptr;
   }

@@ -435,6 +435,24 @@ void LampDAGToDAGISel::Select(SDNode *N) {
     }
   }
 
+  if (N->getOpcode() == LampISD::LDAR) {
+    SDValue Base, Offset;
+    if (SelectAddr(N->getOperand(1), Base, Offset)) {
+      SDValue Ops[] = {Base, Offset, N->getOperand(0)};
+      CurDAG->SelectNodeTo(N, Lamp::LDAR, MVT::i32, MVT::Other, Ops);
+      return;
+    }
+  }
+
+  if (N->getOpcode() == LampISD::STLR) {
+    SDValue Base, Offset;
+    if (SelectAddr(N->getOperand(2), Base, Offset)) {
+      SDValue Ops[] = {N->getOperand(1), Base, Offset, N->getOperand(0)};
+      CurDAG->SelectNodeTo(N, Lamp::STLR, MVT::Other, Ops);
+      return;
+    }
+  }
+
   SelectCode(N);
 }
 

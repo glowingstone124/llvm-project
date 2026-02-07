@@ -16,6 +16,7 @@ add_llvm_target(LampCodeGen
         LampISelDAGToDAG.cpp
         LampISelLowering.cpp
         LampRegisterInfo.cpp
+        LampSelectionDAGInfo.cpp
         LampSubtarget.cpp
         LampTargetMachine.cpp
 

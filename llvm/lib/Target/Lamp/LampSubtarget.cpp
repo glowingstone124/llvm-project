@@ -1,4 +1,5 @@
 #include "LampSubtarget.h"
+#include "LampSelectionDAGInfo.h"
 #include "LampTargetMachine.h"
 
 using namespace llvm;
@@ -17,5 +18,5 @@ LampSubtarget::LampSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
       InstrInfo(*this),
       FrameLowering(*this),
       TLInfo(TM, *this) {
-  TSInfo = std::make_unique<SelectionDAGTargetInfo>();
+  TSInfo = std::make_unique<LampSelectionDAGInfo>();
 }

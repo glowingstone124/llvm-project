@@ -17,6 +17,8 @@ enum NodeType : unsigned {
   CAS,
   XADD,
   XCHG,
+  LDAR,
+  STLR,
 };
 } // namespace LampISD
 
