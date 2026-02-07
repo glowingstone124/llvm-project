@@ -13,6 +13,10 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   CALL,
   RET,
+  FENCE,
+  CAS,
+  XADD,
+  XCHG,
 };
 } // namespace LampISD
 

@@ -78,6 +78,13 @@ class LampInstRdRsRs<string Mn, bits<8> Op> : LampInstBase {
   let Inst{63-56} = Op;
 }
 
+class LampInstRsRs<string Mn, bits<8> Op> : LampInstBase {
+  let OutOperandList = (outs);
+  let InOperandList  = (ins GPR:$rs, GPR:$rs1);
+  let AsmString = !strconcat(Mn, " $rs, $rs1");
+  let Inst{63-56} = Op;
+}
+
 class LampInstRdRsImm<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs GPR:$rd);
   let InOperandList  = (ins GPR:$rs1, Lamp_i32imm:$imm);
@@ -96,6 +103,13 @@ class LampInstRdRsRsImm<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs GPR:$rd);
   let InOperandList  = (ins GPR:$rs1, GPR:$rs2, Lamp_i32imm:$imm);
   let AsmString = !strconcat(Mn, " $rd, $rs1, $rs2, $imm");
+  let Inst{63-56} = Op;
+}
+
+class LampInstRdRsRsRsImm<string Mn, bits<8> Op> : LampInstBase {
+  let OutOperandList = (outs GPR:$rd);
+  let InOperandList  = (ins GPR:$rs1, GPR:$rs2, GPR:$rs3, Lamp_i32imm:$imm);
+  let AsmString = !strconcat(Mn, " $rd, $rs1, $rs2, $rs3, $imm");
   let Inst{63-56} = Op;
 }
 
@@ -175,6 +189,22 @@ def INC  : LampInstRd<"inc", 0x37>;
 def PUSH : LampInstRd<"push", 0x08>;
 def POP  : LampInstRd<"pop", 0x09>;
 def INT  : LampInstRd<"int", 0x1A>;
+def IRET : LampInstNone<"iret", 0x1B>;
+def CPUID : LampInstRd<"cpuid", 0x48> { let hasSideEffects = 1; }
+def PAUSE : LampInstNone<"pause", 0x45> { let hasSideEffects = 1; }
+def FENCE : LampInstNone<"fence", 0x44> { let hasSideEffects = 1; }
+def STARTAP : LampInstRsRsImm<"startap", 0x46> { let hasSideEffects = 1; }
+def IPI : LampInstRsRs<"ipi", 0x47> { let hasSideEffects = 1; }
+
+let mayLoad = 1, mayStore = 1 in {
+  def CAS  : LampInstRdRsRsRsImm<"cas",  0x3F>;
+  def XADD : LampInstRdRsRsImm<"xadd", 0x40>;
+  def XCHG : LampInstRdRsRsImm<"xchg", 0x41>;
+}
+let mayLoad = 1 in
+def LDAR : LampInstRdRsImm<"ldar", 0x42>;
+let mayStore = 1 in
+def STLR : LampInstRsRsImm<"stlr", 0x43>;
 
 let isTerminator = 1, isBarrier = 1 in {
   def HALT : LampInstNone<"halt", 0x05>;

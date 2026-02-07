@@ -410,6 +410,31 @@ void LampDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
+  if (N->getOpcode() == LampISD::FENCE) {
+    CurDAG->SelectNodeTo(N, Lamp::FENCE, MVT::Other, N->getOperand(0));
+    return;
+  }
+
+  if (N->getOpcode() == LampISD::XCHG || N->getOpcode() == LampISD::XADD) {
+    SDValue Base, Offset;
+    if (SelectAddr(N->getOperand(1), Base, Offset)) {
+      unsigned Opc = N->getOpcode() == LampISD::XCHG ? Lamp::XCHG : Lamp::XADD;
+      SDValue Ops[] = {Base, N->getOperand(2), Offset, N->getOperand(0)};
+      CurDAG->SelectNodeTo(N, Opc, MVT::i32, MVT::Other, Ops);
+      return;
+    }
+  }
+
+  if (N->getOpcode() == LampISD::CAS) {
+    SDValue Base, Offset;
+    if (SelectAddr(N->getOperand(1), Base, Offset)) {
+      SDValue Ops[] = {Base, N->getOperand(2), N->getOperand(3), Offset,
+                       N->getOperand(0)};
+      CurDAG->SelectNodeTo(N, Lamp::CAS, MVT::i32, MVT::Other, Ops);
+      return;
+    }
+  }
+
   SelectCode(N);
 }
 
