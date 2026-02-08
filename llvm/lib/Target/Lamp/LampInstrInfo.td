@@ -44,16 +44,14 @@ class LampInstRsTarget<string Mn, bits<8> Op> : LampInstBase {
 
 class LampCallInst<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs);
-  let InOperandList = (ins brtarget:$target, GPR:$a0, GPR:$a1, GPR:$a2,
-                           GPR:$a3, GPR:$a4, GPR:$a5, GPR:$a6, GPR:$a7);
+  let InOperandList = (ins brtarget:$target);
   let AsmString = !strconcat(Mn, " $target");
   let Inst{63-56} = Op;
 }
 
 class LampCallRegInst<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs);
-  let InOperandList = (ins GPR:$rs, GPR:$a0, GPR:$a1, GPR:$a2,
-                           GPR:$a3, GPR:$a4, GPR:$a5, GPR:$a6, GPR:$a7);
+  let InOperandList = (ins GPR:$rs);
   let AsmString = !strconcat(Mn, " $rs");
   let Inst{63-56} = Op;
 }
@@ -284,7 +282,7 @@ def : Pat<(seteq i32:$lhs, i32:$rhs),
             (SHRI
               (OR
                 (SUB GPR:$lhs, GPR:$rhs),
-                (SUB (i32 0), (SUB GPR:$lhs, GPR:$rhs))),
+                (SUB (MOVI 0), (SUB GPR:$lhs, GPR:$rhs))),
               31),
             1)>;
 
@@ -292,5 +290,5 @@ def : Pat<(setne i32:$lhs, i32:$rhs),
           (SHRI
             (OR
               (SUB GPR:$lhs, GPR:$rhs),
-              (SUB (i32 0), (SUB GPR:$lhs, GPR:$rhs))),
+              (SUB (MOVI 0), (SUB GPR:$lhs, GPR:$rhs))),
             31)>;

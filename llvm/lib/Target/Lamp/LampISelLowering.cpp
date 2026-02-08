@@ -18,9 +18,20 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
     : TargetLowering(TM, STI) {
   addRegisterClass(MVT::i32, &Lamp::GPRRegClass);
   MVT PtrVT = getPointerTy(TM.createDataLayout());
-  setOperationAction(ISD::GlobalAddress, PtrVT, Custom);
-  setOperationAction(ISD::ExternalSymbol, PtrVT, Custom);
-  setOperationAction(ISD::BlockAddress, PtrVT, Custom);
+  (void)PtrVT;
+
+  // Lamp only has a 32-bit integer register class. Keep narrow integer
+  // arithmetic out of ISel by promoting it to i32 first.
+  for (MVT VT : {MVT::i8, MVT::i16}) {
+    for (unsigned Opc : {ISD::ADD, ISD::SUB, ISD::MUL, ISD::SHL, ISD::SRL,
+                         ISD::SRA, ISD::AND, ISD::OR, ISD::XOR}) {
+      setOperationAction(Opc, VT, Promote);
+    }
+    setOperationAction(ISD::SETCC, VT, Promote);
+    setOperationAction(ISD::BR_CC, VT, Promote);
+    setOperationAction(ISD::SELECT_CC, VT, Promote);
+  }
+
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
   setOperationAction(ISD::ATOMIC_CMP_SWAP, MVT::i32, Custom);
   setOperationAction(ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS, MVT::i32, Expand);
@@ -37,18 +48,6 @@ SDValue LampTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
   SDLoc DL(Op);
   switch (Op.getOpcode()) {
-  case ISD::GlobalAddress: {
-    auto *GA = cast<GlobalAddressSDNode>(Op);
-    return DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i32);
-  }
-  case ISD::ExternalSymbol: {
-    auto *ES = cast<ExternalSymbolSDNode>(Op);
-    return DAG.getTargetExternalSymbol(ES->getSymbol(), MVT::i32);
-  }
-  case ISD::BlockAddress: {
-    auto *BA = cast<BlockAddressSDNode>(Op);
-    return DAG.getTargetBlockAddress(BA->getBlockAddress(), MVT::i32);
-  }
   case ISD::ATOMIC_FENCE:
     return DAG.getNode(LampISD::FENCE, DL, MVT::Other, Op.getOperand(0));
   case ISD::ATOMIC_SWAP: {
@@ -118,6 +117,21 @@ const char *LampTargetLowering::getTargetNodeName(unsigned Opcode) const {
   }
 }
 
+TargetLowering::ConstraintType
+LampTargetLowering::getConstraintType(StringRef Constraint) const {
+  if (Constraint.size() == 1 && Constraint[0] == 'r')
+    return C_RegisterClass;
+  return TargetLowering::getConstraintType(Constraint);
+}
+
+std::pair<unsigned, const TargetRegisterClass *>
+LampTargetLowering::getRegForInlineAsmConstraint(
+    const TargetRegisterInfo *TRI, StringRef Constraint, MVT VT) const {
+  if (Constraint.size() == 1 && Constraint[0] == 'r')
+    return std::make_pair(0U, &Lamp::GPRRegClass);
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
 SDValue LampTargetLowering::LowerCall(
     CallLoweringInfo &CLI, SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
@@ -180,20 +194,9 @@ SDValue LampTargetLowering::LowerCall(
   }
 
   SDVTList NodeTys = DAG.getVTList(MVT::Other);
-  SDValue ArgRegs[8] = {
-      DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32),
-      DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32),
-      DAG.getUNDEF(MVT::i32), DAG.getUNDEF(MVT::i32)};
-  for (const auto &[Reg, Val] : RegsToPass) {
-    if (Reg >= Lamp::R0 && Reg <= Lamp::R7)
-      ArgRegs[Reg - Lamp::R0] = DAG.getRegister(Reg, Val.getValueType());
-  }
-
   SmallVector<SDValue, 16> Ops;
   Ops.push_back(Chain);
   Ops.push_back(Callee);
-  for (SDValue V : ArgRegs)
-    Ops.push_back(V);
 
   Chain = DAG.getNode(CallOpc, DL, NodeTys, Ops);
 

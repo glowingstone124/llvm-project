@@ -11,7 +11,12 @@
 namespace {
 class LampMCAsmInfo : public llvm::MCAsmInfoELF {
 public:
-  LampMCAsmInfo() = default;
+  LampMCAsmInfo() {
+    // Lamp doesn't have an MC asm parser yet. Let inline asm pass through as
+    // raw textual assembly instead of fataling during -S emission.
+    UseIntegratedAssembler = false;
+    ParseInlineAsmUsingAsmParser = false;
+  }
 };
 } // namespace
 

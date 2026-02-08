@@ -15,8 +15,16 @@ void LampInstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
 
 void LampInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                    raw_ostream &OS) {
+  if (OpNo >= MI->getNumOperands()) {
+    OS << "<bad-op>";
+    return;
+  }
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg()) {
+    if (!Op.getReg()) {
+      OS << "noreg";
+      return;
+    }
     OS << getRegisterName(Op.getReg());
   } else if (Op.isImm()) {
     OS << Op.getImm();
@@ -28,19 +36,30 @@ void LampInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
 
 void LampInstPrinter::printImm(const MCInst *MI, unsigned OpNo,
                                raw_ostream &OS) {
+  if (OpNo >= MI->getNumOperands()) {
+    OS << "<bad-imm>";
+    return;
+  }
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm()) {
     OS << Op.getImm();
-  } else {
-    assert(Op.isExpr() && "imm operand must be imm or expr");
+  } else if (Op.isExpr()) {
     MAI.printExpr(OS, *Op.getExpr());
+  } else {
+    OS << "<bad-imm-kind>";
   }
 }
 
 void LampInstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                 StringRef Annot, const MCSubtargetInfo &STI,
                                 raw_ostream &OS) {
-  if (!printAliasInstr(MI, Address, OS))
+  if (!printAliasInstr(MI, Address, OS)) {
+    if (!getMnemonic(*MI).first) {
+      OS << "\t# unprintable opcode " << MI->getOpcode();
+      printAnnotation(OS, Annot);
+      return;
+    }
     printInstruction(MI, Address, OS);
+  }
   printAnnotation(OS, Annot);
 }
