@@ -97,6 +97,8 @@ const char *LampTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   case LampISD::CALL:
     return "LampISD::CALL";
+  case LampISD::CALLR:
+    return "LampISD::CALLR";
   case LampISD::RET:
     return "LampISD::RET";
   case LampISD::FENCE:
@@ -166,12 +168,16 @@ SDValue LampTargetLowering::LowerCall(
     Chain = DAG.getCopyToReg(Chain, DL, Reg, Val);
   }
 
-  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
+  unsigned CallOpc = LampISD::CALL;
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
     Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32);
-  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
+  } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32);
-  else
-    report_fatal_error("Lamp only supports direct calls currently");
+  } else {
+    if (Callee.getValueType() != MVT::i32)
+      Callee = DAG.getZExtOrTrunc(Callee, DL, MVT::i32);
+    CallOpc = LampISD::CALLR;
+  }
 
   SDVTList NodeTys = DAG.getVTList(MVT::Other);
   SDValue ArgRegs[8] = {
@@ -189,7 +195,7 @@ SDValue LampTargetLowering::LowerCall(
   for (SDValue V : ArgRegs)
     Ops.push_back(V);
 
-  Chain = DAG.getNode(LampISD::CALL, DL, NodeTys, Ops);
+  Chain = DAG.getNode(CallOpc, DL, NodeTys, Ops);
 
   SmallVector<CCValAssign, 16> RVLocs;
   CCState RetCCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), RVLocs,

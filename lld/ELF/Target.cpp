@@ -74,6 +74,8 @@ void elf::setTarget(Ctx &ctx) {
     return setAVRTargetInfo(ctx);
   case EM_HEXAGON:
     return setHexagonTargetInfo(ctx);
+  case EM_LAMP:
+    return setLampTargetInfo(ctx);
   case EM_LOONGARCH:
     return setLoongArchTargetInfo(ctx);
   case EM_MIPS:

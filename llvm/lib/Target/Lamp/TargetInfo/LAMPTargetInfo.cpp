@@ -11,6 +11,6 @@ Target &llvm::getTheLampTarget() {
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeLampTargetInfo() {
-  RegisterTarget<Triple::UnknownArch, /*HasJIT=*/false>
+  RegisterTarget<Triple::lamp, /*HasJIT=*/false>
       X(getTheLampTarget(), "lamp", "LampVM Target", "Lamp");
 }

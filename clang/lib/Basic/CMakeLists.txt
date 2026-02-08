@@ -104,6 +104,7 @@ add_clang_library(clangBasic
   Targets/CSKY.cpp
   Targets/DirectX.cpp
   Targets/Hexagon.cpp
+  Targets/Lamp.cpp
   Targets/Lanai.cpp
   Targets/LoongArch.cpp
   Targets/M68k.cpp

@@ -11,10 +11,7 @@
 namespace {
 class LampMCAsmInfo : public llvm::MCAsmInfoELF {
 public:
-  LampMCAsmInfo() {
-    setUseIntegratedAssembler(false);
-    setParseInlineAsmUsingAsmParser(false);
-  }
+  LampMCAsmInfo() = default;
 };
 } // namespace
 
@@ -72,4 +69,6 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeLampTargetMC() {
   TargetRegistry::RegisterMCRegInfo(T, createLampMCRegisterInfo);
   TargetRegistry::RegisterMCSubtargetInfo(T, createLampMCSubtargetInfo);
   TargetRegistry::RegisterMCInstPrinter(T, createLampMCInstPrinter);
+  TargetRegistry::RegisterMCCodeEmitter(T, createLampMCCodeEmitter);
+  TargetRegistry::RegisterMCAsmBackend(T, createLampMCAsmBackend);
 }

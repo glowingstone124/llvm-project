@@ -22,6 +22,19 @@ add_llvm_target(LampCodeGen
 
         DEPENDS
         LampCommonTableGen
+
+        LINK_COMPONENTS
+        AsmPrinter
+        CodeGen
+        CodeGenTypes
+        Core
+        MC
+        SelectionDAG
+        Support
+        Target
+        TargetParser
+        LampDesc
+        LampInfo
 )
 
 add_subdirectory(TargetInfo)

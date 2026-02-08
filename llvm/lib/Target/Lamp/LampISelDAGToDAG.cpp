@@ -184,7 +184,8 @@ void LampDAGToDAGISel::Select(SDNode *N) {
 
   if (N->getOpcode() == ISD::LOAD) {
     auto *LD = cast<LoadSDNode>(N);
-    if (LD->isSimple() && LD->getMemoryVT() == MVT::i32) {
+    if (!LD->isIndexed() && LD->getExtensionType() == ISD::NON_EXTLOAD &&
+        LD->getMemoryVT() == MVT::i32 && LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
         SDValue Ops[] = {Base, Offset, LD->getChain()};
@@ -192,8 +193,10 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         return;
       }
     }
-    if (LD->isSimple() && LD->getMemoryVT() == MVT::i8 &&
-        LD->getValueType(0) == MVT::i32) {
+    if (!LD->isIndexed() &&
+        (LD->getExtensionType() == ISD::NON_EXTLOAD ||
+         LD->getExtensionType() == ISD::ZEXTLOAD) &&
+        LD->getMemoryVT() == MVT::i8 && LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
         SDValue Ops[] = {Base, Offset, LD->getChain()};
@@ -205,19 +208,51 @@ void LampDAGToDAGISel::Select(SDNode *N) {
 
   if (N->getOpcode() == ISD::STORE) {
     auto *ST = cast<StoreSDNode>(N);
-    if (ST->isSimple() && ST->getMemoryVT() == MVT::i32 &&
+    auto materializeStoreVal = [&](SDValue V, SDLoc DL) {
+      if (V.getValueType() != MVT::i32)
+        V = CurDAG->getNode(ISD::ANY_EXTEND, DL, MVT::i32, V);
+      if (isa<GlobalAddressSDNode>(V) || isa<ExternalSymbolSDNode>(V) ||
+          V.getOpcode() == ISD::TargetGlobalAddress ||
+          V.getOpcode() == ISD::TargetExternalSymbol) {
+        SDValue Sym;
+        if (isa<GlobalAddressSDNode>(V))
+          Sym = CurDAG->getTargetGlobalAddress(
+              cast<GlobalAddressSDNode>(V)->getGlobal(), DL, MVT::i32);
+        else if (isa<ExternalSymbolSDNode>(V))
+          Sym = CurDAG->getTargetExternalSymbol(
+              cast<ExternalSymbolSDNode>(V)->getSymbol(), MVT::i32);
+        else
+          Sym = V;
+
+        SDNode *Mov = CurDAG->getMachineNode(Lamp::MOVI, DL, MVT::i32, Sym);
+        return SDValue(Mov, 0);
+      }
+      if (auto *CN = dyn_cast<ConstantSDNode>(V)) {
+        SDValue Imm =
+            CurDAG->getSignedTargetConstant(CN->getSExtValue(), DL, MVT::i32);
+        SDNode *Mov = CurDAG->getMachineNode(Lamp::MOVI, DL, MVT::i32, Imm);
+        return SDValue(Mov, 0);
+      }
+      return V;
+    };
+
+    if (!ST->isIndexed() && ST->getMemoryVT() == MVT::i32 &&
         !ST->isTruncatingStore()) {
       SDValue Base, Offset;
       if (SelectAddr(ST->getBasePtr(), Base, Offset)) {
-        SDValue Ops[] = {ST->getValue(), Base, Offset, ST->getChain()};
+        SDLoc DL(N);
+        SDValue Val = materializeStoreVal(ST->getValue(), DL);
+        SDValue Ops[] = {Val, Base, Offset, ST->getChain()};
         CurDAG->SelectNodeTo(N, Lamp::STORE32, MVT::Other, Ops);
         return;
       }
     }
-    if (ST->isSimple() && ST->getMemoryVT() == MVT::i8) {
+    if (!ST->isIndexed() && ST->getMemoryVT() == MVT::i8) {
       SDValue Base, Offset;
       if (SelectAddr(ST->getBasePtr(), Base, Offset)) {
-        SDValue Ops[] = {ST->getValue(), Base, Offset, ST->getChain()};
+        SDLoc DL(N);
+        SDValue Val = materializeStoreVal(ST->getValue(), DL);
+        SDValue Ops[] = {Val, Base, Offset, ST->getChain()};
         CurDAG->SelectNodeTo(N, Lamp::STORE, MVT::Other, Ops);
         return;
       }
@@ -397,6 +432,16 @@ void LampDAGToDAGISel::Select(SDNode *N) {
       Ops.push_back(N->getOperand(I));
     Ops.push_back(N->getOperand(0));
     CurDAG->SelectNodeTo(N, Lamp::CALL, MVT::Other, Ops);
+    return;
+  }
+
+  if (N->getOpcode() == LampISD::CALLR) {
+    SmallVector<SDValue, 16> Ops;
+    Ops.push_back(N->getOperand(1));
+    for (unsigned I = 2, E = N->getNumOperands(); I != E; ++I)
+      Ops.push_back(N->getOperand(I));
+    Ops.push_back(N->getOperand(0));
+    CurDAG->SelectNodeTo(N, Lamp::CALLR, MVT::Other, Ops);
     return;
   }
 

@@ -50,6 +50,14 @@ class LampCallInst<string Mn, bits<8> Op> : LampInstBase {
   let Inst{63-56} = Op;
 }
 
+class LampCallRegInst<string Mn, bits<8> Op> : LampInstBase {
+  let OutOperandList = (outs);
+  let InOperandList = (ins GPR:$rs, GPR:$a0, GPR:$a1, GPR:$a2,
+                           GPR:$a3, GPR:$a4, GPR:$a5, GPR:$a6, GPR:$a7);
+  let AsmString = !strconcat(Mn, " $rs");
+  let Inst{63-56} = Op;
+}
+
 class LampInstRd<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs GPR:$rd);
   let InOperandList  = (ins);
@@ -230,6 +238,14 @@ let isCall = 1 in
 def CALL : LampCallInst<"call", 0x0A> {
   // No callee-saved regs; model call as clobbering all general regs
   // except SP/FLAGS so RA doesn't keep values live across calls.
+  let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
+              R8, R9, R10, R11, R12, R13, R14, R15,
+              R16, R17, R18, R19, R20, R21, R22, R23,
+              R24, R25, R26, R27, R28, R29];
+}
+
+let isCall = 1 in
+def CALLR : LampCallRegInst<"callr", 0x49> {
   let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
               R8, R9, R10, R11, R12, R13, R14, R15,
               R16, R17, R18, R19, R20, R21, R22, R23,
