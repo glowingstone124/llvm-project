@@ -91,6 +91,13 @@ class LampInstRsRs<string Mn, bits<8> Op> : LampInstBase {
   let Inst{63-56} = Op;
 }
 
+class LampInstRsImm<string Mn, bits<8> Op> : LampInstBase {
+  let OutOperandList = (outs);
+  let InOperandList  = (ins GPR:$rs, Lamp_i32imm:$imm);
+  let AsmString = !strconcat(Mn, " $rs, $imm");
+  let Inst{63-56} = Op;
+}
+
 class LampInstRdRsImm<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs GPR:$rd);
   let InOperandList  = (ins GPR:$rs1, Lamp_i32imm:$imm);
@@ -138,9 +145,7 @@ def SHL : LampInstRdRsRs<"shl", 0x21>;
 def SHR : LampInstRdRsRs<"shr", 0x22>;
 def SAR : LampInstRdRsRs<"sar", 0x23>;
 
-def CMP  : LampInstRdRsRs<"cmp", 0x12> {
-  let Constraints = "$rs1 = $rd";
-  let AsmString = "cmp $rd, $rs2";
+def CMP  : LampInstRsRs<"cmp", 0x12> {
   let Defs = [FLAGS];
   let hasSideEffects = 1;
 }
@@ -179,9 +184,7 @@ def SHRI    : LampInstRdRsImm<"shri",    0x3E>;
 def LOADX32  : LampInstRdRsRsImm<"loadx32",  0x0E>;
 def STOREX32 : LampInstRdRsRsImm<"storex32", 0x11>;
 
-def CMPI : LampInstRdRsImm<"cmpi", 0x13> {
-  let Constraints = "$rs1 = $rd";
-  let AsmString = "cmpi $rd, $imm";
+def CMPI : LampInstRsImm<"cmpi", 0x13> {
   let Defs = [FLAGS];
   let hasSideEffects = 1;
 }

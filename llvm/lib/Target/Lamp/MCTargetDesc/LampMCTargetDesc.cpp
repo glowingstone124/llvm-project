@@ -12,10 +12,10 @@ namespace {
 class LampMCAsmInfo : public llvm::MCAsmInfoELF {
 public:
   LampMCAsmInfo() {
-    // Lamp doesn't have an MC asm parser yet. Let inline asm pass through as
-    // raw textual assembly instead of fataling during -S emission.
-    UseIntegratedAssembler = false;
-    ParseInlineAsmUsingAsmParser = false;
+    // Lamp now provides an MC asm parser; keep inline asm on the normal
+    // integrated-assembler path for both .s output and object emission.
+    UseIntegratedAssembler = true;
+    ParseInlineAsmUsingAsmParser = true;
   }
 };
 } // namespace

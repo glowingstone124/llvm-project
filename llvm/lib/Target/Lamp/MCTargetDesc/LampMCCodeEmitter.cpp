@@ -26,6 +26,7 @@ enum class LampInstForm {
   RdRs,
   RdRsRs,
   RsRs,
+  RsImm,
   RdRsImm,
   RsRsImm,
   RdRsRsImm,
@@ -193,12 +194,14 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) {
   case Lamp::SHL:
   case Lamp::SHR:
   case Lamp::SAR:
-  case Lamp::CMP:
   case Lamp::FADD:
   case Lamp::FSUB:
   case Lamp::FMUL:
   case Lamp::FDIV:
     return LampInstForm::RdRsRs;
+
+  case Lamp::CMP:
+    return LampInstForm::RsRs;
 
   case Lamp::LOAD:
   case Lamp::LOAD32:
@@ -212,9 +215,11 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) {
   case Lamp::XORI:
   case Lamp::SHLI:
   case Lamp::SHRI:
-  case Lamp::CMPI:
   case Lamp::LDAR:
     return LampInstForm::RdRsImm;
+
+  case Lamp::CMPI:
+    return LampInstForm::RsImm;
 
   case Lamp::STORE:
   case Lamp::STORE32:
@@ -358,12 +363,6 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
       rs1 = rd;
     break;
   case LampInstForm::RdRsRs:
-    if (MI.getOpcode() == Lamp::CMP && NumOps == 2) {
-      rd = encodeRegOperand(0);
-      rs1 = rd;
-      rs2 = encodeRegOperand(1);
-      break;
-    }
     if (NumOps < 3)
       report_fatal_error("LampMCCodeEmitter: missing rd,rs1,rs2 operands");
     rd = encodeRegOperand(0);
@@ -376,13 +375,13 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
     rd = encodeRegOperand(0);
     rs1 = encodeRegOperand(1);
     break;
+  case LampInstForm::RsImm:
+    if (NumOps < 2)
+      report_fatal_error("LampMCCodeEmitter: missing rs,imm operands");
+    rd = encodeRegOperand(0);
+    imm = encodeImm(MI.getOperand(1), Fixups);
+    break;
   case LampInstForm::RdRsImm:
-    if (MI.getOpcode() == Lamp::CMPI && NumOps == 2) {
-      rd = encodeRegOperand(0);
-      rs1 = rd;
-      imm = encodeImm(MI.getOperand(1), Fixups);
-      break;
-    }
     if (NumOps < 3)
       report_fatal_error("LampMCCodeEmitter: missing rd,rs1,imm operands");
     rd = encodeRegOperand(0);

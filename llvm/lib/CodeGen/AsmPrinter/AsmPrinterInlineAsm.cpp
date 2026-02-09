@@ -118,9 +118,14 @@ void AsmPrinter::emitInlineAsm(StringRef Str, const MCSubtargetInfo &STI,
   assert(MII && "Failed to create instruction info");
   std::unique_ptr<MCTargetAsmParser> TAP(TM.getTarget().createMCAsmParser(
       STI, *Parser, *MII, MCOptions));
-  if (!TAP)
-    report_fatal_error("Inline asm not supported by this streamer because"
-                       " we don't have an asm parser for this target\n");
+  if (!TAP) {
+    const SMLoc Loc = SMLoc::getFromPointer(
+        SrcMgr.getMemoryBuffer(BufNum)->getBufferStart());
+    OutContext.reportError(
+        Loc, "inline asm is not supported for this target: no asm parser "
+             "is available");
+    return;
+  }
 
   // Respect inlineasm dialect on X86 targets only
   if (TM.getTargetTriple().isX86()) {

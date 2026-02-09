@@ -39,6 +39,7 @@ add_llvm_target(LampCodeGen
 
 add_subdirectory(TargetInfo)
 add_subdirectory(MCTargetDesc)
+add_subdirectory(AsmParser)
 add_library(Lamp INTERFACE)
 target_link_libraries(Lamp INTERFACE
         LLVMLampCodeGen
