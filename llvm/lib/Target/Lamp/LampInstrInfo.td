@@ -225,8 +225,11 @@ let isTerminator = 1, isBarrier = 1 in {
 
 let isTerminator = 1, isBranch = 1 in {
   def JMP  : LampInstTarget<"jmp", 0x06>;
+  def RJMP : LampInstTarget<"rjmp", 0x4A>;
   def JZ   : LampInstRsTarget<"jz", 0x07>;
+  def RJZ  : LampInstRsTarget<"rjz", 0x4C>;
   def JNZ  : LampInstRsTarget<"jnz", 0x24>;
+  def RJNZ : LampInstRsTarget<"rjnz", 0x4D>;
   def JG   : LampInstTarget<"jg", 0x25> { let Uses = [FLAGS]; }
   def JGE  : LampInstTarget<"jge", 0x26> { let Uses = [FLAGS]; }
   def JL   : LampInstTarget<"jl", 0x27> { let Uses = [FLAGS]; }
@@ -237,6 +240,7 @@ let isTerminator = 1, isBranch = 1 in {
 
 let isCall = 1 in
 def CALL : LampCallInst<"call", 0x0A> {
+  let Uses = [R0, R1, R2, R3, R4, R5, R6, R7];
   // No callee-saved regs; model call as clobbering all general regs
   // except SP/FLAGS so RA doesn't keep values live across calls.
   let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
@@ -246,7 +250,17 @@ def CALL : LampCallInst<"call", 0x0A> {
 }
 
 let isCall = 1 in
+def RCALL : LampCallInst<"rcall", 0x4B> {
+  let Uses = [R0, R1, R2, R3, R4, R5, R6, R7];
+  let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
+              R8, R9, R10, R11, R12, R13, R14, R15,
+              R16, R17, R18, R19, R20, R21, R22, R23,
+              R24, R25, R26, R27, R28, R29];
+}
+
+let isCall = 1 in
 def CALLR : LampCallRegInst<"callr", 0x49> {
+  let Uses = [R0, R1, R2, R3, R4, R5, R6, R7];
   let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
               R8, R9, R10, R11, R12, R13, R14, R15,
               R16, R17, R18, R19, R20, R21, R22, R23,

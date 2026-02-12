@@ -31,6 +31,7 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
     setOperationAction(ISD::BR_CC, VT, Promote);
     setOperationAction(ISD::SELECT_CC, VT, Promote);
   }
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
 
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
   setOperationAction(ISD::ATOMIC_CMP_SWAP, MVT::i32, Custom);
@@ -145,8 +146,6 @@ SDValue LampTargetLowering::LowerCall(
   bool IsVarArg = CLI.IsVarArg;
 
   CLI.IsTailCall = false;
-  if (IsVarArg)
-    report_fatal_error("Lamp vararg call is not supported yet");
 
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
@@ -154,10 +153,16 @@ SDValue LampTargetLowering::LowerCall(
   CCInfo.AnalyzeCallOperands(Outs, CC_Lamp);
 
   unsigned NumBytes = CCInfo.getStackSize();
-  if (NumBytes != 0)
-    report_fatal_error("Lamp stack call arguments are not supported yet");
-
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  SDValue StackPtr = DAG.getRegister(Lamp::R30, MVT::i32);
+  SDValue StackAdj;
+  if (NumBytes != 0) {
+    SDValue SP = DAG.getCopyFromReg(Chain, DL, Lamp::R30, MVT::i32);
+    Chain = SP.getValue(1);
+    StackAdj = DAG.getIntPtrConstant(NumBytes, DL);
+    StackPtr = DAG.getNode(ISD::SUB, DL, MVT::i32, SP, StackAdj);
+    Chain = DAG.getCopyToReg(Chain, DL, Lamp::R30, StackPtr);
+  }
 
   for (unsigned I = 0; I < ArgLocs.size(); ++I) {
     CCValAssign &VA = ArgLocs[I];
@@ -175,7 +180,9 @@ SDValue LampTargetLowering::LowerCall(
       continue;
     }
 
-    report_fatal_error("Lamp stack-passed call args are not supported yet");
+    SDValue PtrOff = DAG.getIntPtrConstant(VA.getLocMemOffset(), DL);
+    SDValue Ptr = DAG.getNode(ISD::ADD, DL, MVT::i32, StackPtr, PtrOff);
+    Chain = DAG.getStore(Chain, DL, Arg, Ptr, MachinePointerInfo());
   }
 
   for (const auto &[Reg, Val] : RegsToPass) {
@@ -199,6 +206,13 @@ SDValue LampTargetLowering::LowerCall(
   Ops.push_back(Callee);
 
   Chain = DAG.getNode(CallOpc, DL, NodeTys, Ops);
+
+  if (NumBytes != 0) {
+    SDValue SP = DAG.getCopyFromReg(Chain, DL, Lamp::R30, MVT::i32);
+    Chain = SP.getValue(1);
+    SDValue RestoredSP = DAG.getNode(ISD::ADD, DL, MVT::i32, SP, StackAdj);
+    Chain = DAG.getCopyToReg(Chain, DL, Lamp::R30, RestoredSP);
+  }
 
   SmallVector<CCValAssign, 16> RVLocs;
   CCState RetCCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), RVLocs,

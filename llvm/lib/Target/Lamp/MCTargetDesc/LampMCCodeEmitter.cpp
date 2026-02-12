@@ -49,6 +49,7 @@ private:
 
   static uint8_t getOpcodeByte(unsigned Opc);
   static LampInstForm getInstForm(unsigned Opc);
+  static bool isPCRelativeTargetOpcode(unsigned Opc);
 
   uint8_t encodeReg(const MCOperand &Op) const;
   uint32_t encodeImm(const MCOperand &Op, SmallVectorImpl<MCFixup> &Fixups,
@@ -67,7 +68,9 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) {
   case Lamp::JZ: return 0x07;
   case Lamp::PUSH: return 0x08;
   case Lamp::POP: return 0x09;
+  case Lamp::RJMP: return 0x4A;
   case Lamp::CALL: return 0x0A;
+  case Lamp::RCALL: return 0x4B;
   case Lamp::CALLR: return 0x49;
   case Lamp::RET: return 0x0B;
   case Lamp::LOAD: return 0x0C;
@@ -95,6 +98,8 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) {
   case Lamp::SHR: return 0x22;
   case Lamp::SAR: return 0x23;
   case Lamp::JNZ: return 0x24;
+  case Lamp::RJZ: return 0x4C;
+  case Lamp::RJNZ: return 0x4D;
   case Lamp::JG: return 0x25;
   case Lamp::JGE: return 0x26;
   case Lamp::JL: return 0x27;
@@ -153,10 +158,13 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) {
   case Lamp::JLE:
   case Lamp::JC:
   case Lamp::JNC:
+  case Lamp::RJMP:
     return LampInstForm::Target;
 
   case Lamp::JZ:
   case Lamp::JNZ:
+  case Lamp::RJZ:
+  case Lamp::RJNZ:
     return LampInstForm::RsTarget;
 
   case Lamp::INC:
@@ -238,6 +246,7 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) {
     return LampInstForm::RdRsRsRsImm;
 
   case Lamp::CALL:
+  case Lamp::RCALL:
     return LampInstForm::Call;
   case Lamp::CALLR:
     return LampInstForm::Rd;
@@ -247,6 +256,18 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) {
   default:
     report_fatal_error("LampMCCodeEmitter: unknown instruction form");
     return LampInstForm::None;
+  }
+}
+
+bool LampMCCodeEmitter::isPCRelativeTargetOpcode(unsigned Opc) {
+  switch (Opc) {
+  case Lamp::RJMP:
+  case Lamp::RCALL:
+  case Lamp::RJZ:
+  case Lamp::RJNZ:
+    return true;
+  default:
+    return false;
   }
 }
 
@@ -332,15 +353,19 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case LampInstForm::Call:
     if (NumOps < 1)
       report_fatal_error("LampMCCodeEmitter: missing immediate operand");
-    imm = encodeImm(MI.getOperand(0), Fixups, Lamp::fixup_lamp_pc32,
-                    /*IsPCRel=*/true);
+    imm = encodeImm(MI.getOperand(0),
+                    Fixups,
+                    isPCRelativeTargetOpcode(MI.getOpcode()) ? Lamp::fixup_lamp_pc32 : Lamp::fixup_lamp_32,
+                    isPCRelativeTargetOpcode(MI.getOpcode()));
     break;
   case LampInstForm::RsTarget:
     if (NumOps < 2)
       report_fatal_error("LampMCCodeEmitter: missing rs,target operands");
     rd = encodeRegOperand(0);
-    imm = encodeImm(MI.getOperand(1), Fixups, Lamp::fixup_lamp_pc32,
-                    /*IsPCRel=*/true);
+    imm = encodeImm(MI.getOperand(1),
+                    Fixups,
+                    isPCRelativeTargetOpcode(MI.getOpcode()) ? Lamp::fixup_lamp_pc32 : Lamp::fixup_lamp_32,
+                    isPCRelativeTargetOpcode(MI.getOpcode()));
     break;
   case LampInstForm::Rd:
     if (NumOps < 1)
