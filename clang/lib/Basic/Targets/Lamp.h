@@ -69,9 +69,19 @@ public:
 
   bool validateAsmConstraint(const char *&Name,
                              TargetInfo::ConstraintInfo &Info) const override {
-    (void)Name;
-    (void)Info;
-    return false;
+    switch (*Name) {
+    case 'r':
+      Info.setAllowsRegister();
+      return true;
+    case 'm':
+      Info.setAllowsMemory();
+      return true;
+    case 'I':
+      Info.setRequiresImmediate();
+      return true;
+    default:
+      return false;
+    }
   }
 
   std::string_view getClobbers() const override { return ""; }

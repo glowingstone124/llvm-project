@@ -57,6 +57,8 @@ void LampFrameLowering::emitEpilogue(MachineFunction &MF,
 
 bool LampFrameLowering::hasFPImpl(const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
-  return MF.getTarget().Options.DisableFramePointerElim(MF) ||
-         MFI.hasVarSizedObjects();
+  // Lamp currently does not preserve an incoming caller FP (R31) in prologue/
+  // epilogue. Until full callee-save + CFA semantics are wired up, avoid
+  // forcing FP at -O0 and only require it for variable-sized stack frames.
+  return MFI.hasVarSizedObjects();
 }

@@ -7,6 +7,8 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/MathExtras.h"
 
 using namespace llvm;
@@ -14,6 +16,13 @@ using namespace llvm;
 #define DEBUG_TYPE "lamp-lower"
 
 #include "LampGenCallingConv.inc"
+
+static void diagnoseUnsupported(const SDLoc &DL, SelectionDAG &DAG,
+                                const Twine &Msg) {
+  MachineFunction &MF = DAG.getMachineFunction();
+  DAG.getContext()->diagnose(
+      DiagnosticInfoUnsupported(MF.getFunction(), Msg, DL.getDebugLoc()));
+}
 
 static SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) {
   MachineFunction &MF = DAG.getMachineFunction();
@@ -96,6 +105,7 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
   setOperationAction(ISD::VACOPY, MVT::Other, Expand);
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Custom);
+  setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
   computeRegisterProperties(STI.getRegisterInfo());
   setStackPointerRegisterToSaveRestore(Lamp::R30);
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -147,6 +157,9 @@ SDValue LampTargetLowering::LowerOperation(SDValue Op,
     return DAG.getMemIntrinsicNode(LampISD::CAS, DL, VTs, Ops,
                                    AN->getMemoryVT(), AN->getMemOperand());
   }
+  case ISD::GlobalTLSAddress:
+    diagnoseUnsupported(DL, DAG, "TLS is not supported on the Lamp target");
+    return DAG.getUNDEF(Op.getValueType());
   default:
     break;
   }
@@ -182,7 +195,24 @@ TargetLowering::ConstraintType
 LampTargetLowering::getConstraintType(StringRef Constraint) const {
   if (Constraint.size() == 1 && Constraint[0] == 'r')
     return C_RegisterClass;
+  if (Constraint.size() == 1 && Constraint[0] == 'I')
+    return C_Immediate;
   return TargetLowering::getConstraintType(Constraint);
+}
+
+TargetLowering::ConstraintWeight
+LampTargetLowering::getSingleConstraintMatchWeight(
+    AsmOperandInfo &Info, const char *Constraint) const {
+  if (!Info.CallOperandVal)
+    return CW_Default;
+
+  if (*Constraint == 'I') {
+    if (auto *CI = dyn_cast<ConstantInt>(Info.CallOperandVal))
+      return isInt<32>(CI->getSExtValue()) ? CW_Constant : CW_Invalid;
+    return CW_Invalid;
+  }
+
+  return TargetLowering::getSingleConstraintMatchWeight(Info, Constraint);
 }
 
 std::pair<unsigned, const TargetRegisterClass *>
@@ -191,6 +221,22 @@ LampTargetLowering::getRegForInlineAsmConstraint(
   if (Constraint.size() == 1 && Constraint[0] == 'r')
     return std::make_pair(0U, &Lamp::GPRRegClass);
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
+void LampTargetLowering::LowerAsmOperandForConstraint(
+    SDValue Op, StringRef Constraint, std::vector<SDValue> &Ops,
+    SelectionDAG &DAG) const {
+  if (Constraint.size() == 1 && Constraint[0] == 'I') {
+    if (auto *C = dyn_cast<ConstantSDNode>(Op)) {
+      int64_t Val = C->getSExtValue();
+      if (isInt<32>(Val)) {
+        Ops.push_back(DAG.getTargetConstant(Val, SDLoc(Op), MVT::i32));
+      }
+    }
+    return;
+  }
+
+  TargetLowering::LowerAsmOperandForConstraint(Op, Constraint, Ops, DAG);
 }
 
 SDValue LampTargetLowering::LowerCall(
@@ -206,6 +252,15 @@ SDValue LampTargetLowering::LowerCall(
   bool IsVarArg = CLI.IsVarArg;
 
   CLI.IsTailCall = false;
+
+  if (isPositionIndependent()) {
+    if (isa<GlobalAddressSDNode>(Callee) || isa<ExternalSymbolSDNode>(Callee) ||
+        Callee.getOpcode() == ISD::TargetGlobalAddress ||
+        Callee.getOpcode() == ISD::TargetExternalSymbol) {
+      diagnoseUnsupported(DL, DAG,
+                          "PIC relocations are not supported on the Lamp target");
+    }
+  }
 
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
@@ -359,7 +414,8 @@ SDValue LampTargetLowering::LowerFormalArguments(
       continue;
     }
 
-    int FI = MF.getFrameInfo().CreateFixedObject(4, VA.getLocMemOffset(), true);
+    int FI = MF.getFrameInfo().CreateFixedObject(VA.getLocVT().getStoreSize(),
+                                                 VA.getLocMemOffset(), true);
     SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
     SDValue Ld = DAG.getLoad(VA.getValVT(), DL, Chain, FIN, MachinePointerInfo());
     InVals.push_back(Ld);
@@ -367,6 +423,16 @@ SDValue LampTargetLowering::LowerFormalArguments(
   }
 
   return Chain;
+}
+
+bool LampTargetLowering::CanLowerReturn(
+    CallingConv::ID CallConv, MachineFunction &MF, bool IsVarArg,
+    const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &Context,
+    const Type *RetTy) const {
+  (void)RetTy;
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, Context);
+  return CCInfo.CheckReturn(Outs, RetCC_Lamp);
 }
 
 SDValue LampTargetLowering::LowerReturn(

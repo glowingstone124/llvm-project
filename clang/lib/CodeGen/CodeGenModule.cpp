@@ -119,6 +119,9 @@ createTargetCodeGenInfo(CodeGenModule &CGM) {
 
   case llvm::Triple::m68k:
     return createM68kTargetCodeGenInfo(CGM);
+
+  case llvm::Triple::lamp:
+    return createLampTargetCodeGenInfo(CGM);
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
     if (Triple.getOS() == llvm::Triple::Win32)

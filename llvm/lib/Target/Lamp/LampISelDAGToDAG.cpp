@@ -4,6 +4,7 @@
 #include "MCTargetDesc/LampMCTargetDesc.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include <functional>
 #include <utility>
 
@@ -97,6 +98,9 @@ public:
 
   void Select(SDNode *N) override;
   bool SelectAddr(SDValue Addr, SDValue &Base, SDValue &Offset);
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op,
+                                    InlineAsm::ConstraintCode ConstraintID,
+                                    std::vector<SDValue> &OutOps) override;
 
 #include "LampGenDAGISel.inc"
 };
@@ -237,7 +241,11 @@ void LampDAGToDAGISel::Select(SDNode *N) {
                   Lamp::SUBI, DL, MVT::i32, SDValue(Xor, 0), Bias);
               return SDValue(Sub, 0);
             }
-            return SDValue(Load8, 0);
+            // Keep byte loads deterministic in i32 regs.
+            SDValue Mask = CurDAG->getTargetConstant(0xff, DL, MVT::i32);
+            SDNode *Masked = CurDAG->getMachineNode(
+                Lamp::ANDI, DL, MVT::i32, SDValue(Load8, 0), Mask);
+            return SDValue(Masked, 0);
           }
 
           if ((LD->getExtensionType() == ISD::ZEXTLOAD ||
@@ -443,6 +451,17 @@ void LampDAGToDAGISel::Select(SDNode *N) {
 
   if (N->getOpcode() == ISD::GlobalAddress) {
     auto *GA = cast<GlobalAddressSDNode>(N);
+    if (TM.isPositionIndependent()) {
+      CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+          CurDAG->getMachineFunction().getFunction(),
+          "PIC relocations are not supported on the Lamp target",
+          SDLoc(N).getDebugLoc()));
+    }
+    if (GA->getGlobal()->isThreadLocal()) {
+      CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+          CurDAG->getMachineFunction().getFunction(),
+          "TLS is not supported on the Lamp target", SDLoc(N).getDebugLoc()));
+    }
     SDValue TGA =
         CurDAG->getTargetGlobalAddress(GA->getGlobal(), SDLoc(N), MVT::i32);
     CurDAG->SelectNodeTo(N, Lamp::MOVI, MVT::i32, TGA);
@@ -451,6 +470,12 @@ void LampDAGToDAGISel::Select(SDNode *N) {
 
   if (N->getOpcode() == ISD::ExternalSymbol) {
     auto *ES = cast<ExternalSymbolSDNode>(N);
+    if (TM.isPositionIndependent()) {
+      CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+          CurDAG->getMachineFunction().getFunction(),
+          "PIC relocations are not supported on the Lamp target",
+          SDLoc(N).getDebugLoc()));
+    }
     SDValue TES =
         CurDAG->getTargetExternalSymbol(ES->getSymbol(), MVT::i32);
     CurDAG->SelectNodeTo(N, Lamp::MOVI, MVT::i32, TES);
@@ -670,8 +695,16 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         LD->getMemoryVT() == MVT::i8 && LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
+        SDLoc DL(N);
         SDValue Ops[] = {Base, Offset, LD->getChain()};
-        CurDAG->SelectNodeTo(N, Lamp::LOAD, MVT::i32, MVT::Other, Ops);
+        SDNode *Load8 =
+            CurDAG->getMachineNode(Lamp::LOAD, DL, {MVT::i32, MVT::Other}, Ops);
+        SDValue Mask = CurDAG->getTargetConstant(0xff, DL, MVT::i32);
+        SDNode *Masked = CurDAG->getMachineNode(
+            Lamp::ANDI, DL, MVT::i32, SDValue(Load8, 0), Mask);
+        CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), SDValue(Masked, 0));
+        CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 1), SDValue(Load8, 1));
+        CurDAG->RemoveDeadNode(N);
         return;
       }
     }
@@ -1079,6 +1112,21 @@ bool LampDAGToDAGISel::SelectAddr(SDValue Addr, SDValue &Base,
   if (isa<GlobalAddressSDNode>(Addr) || isa<ExternalSymbolSDNode>(Addr) ||
       Addr.getOpcode() == ISD::TargetGlobalAddress ||
       Addr.getOpcode() == ISD::TargetExternalSymbol) {
+    if (TM.isPositionIndependent()) {
+      CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+          CurDAG->getMachineFunction().getFunction(),
+          "PIC relocations are not supported on the Lamp target",
+          DL.getDebugLoc()));
+    }
+
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr)) {
+      if (GA->getGlobal()->isThreadLocal()) {
+        CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+            CurDAG->getMachineFunction().getFunction(),
+            "TLS is not supported on the Lamp target", DL.getDebugLoc()));
+      }
+    }
+
     SDValue Sym;
     if (isa<GlobalAddressSDNode>(Addr))
       Sym = CurDAG->getTargetGlobalAddress(
@@ -1119,4 +1167,20 @@ bool LampDAGToDAGISel::SelectAddr(SDValue Addr, SDValue &Base,
   Base = Addr;
   Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
   return true;
+}
+
+bool LampDAGToDAGISel::SelectInlineAsmMemoryOperand(
+    const SDValue &Op, InlineAsm::ConstraintCode ConstraintID,
+    std::vector<SDValue> &OutOps) {
+  if (ConstraintID != InlineAsm::ConstraintCode::m)
+    return true;
+
+  SDValue Base, Offset;
+  if (!SelectAddr(Op, Base, Offset))
+    return true;
+
+  SDLoc DL(Op);
+  SDNode *Addr = CurDAG->getMachineNode(Lamp::ADDI, DL, MVT::i32, Base, Offset);
+  OutOps.push_back(SDValue(Addr, 0));
+  return false;
 }

@@ -2,6 +2,7 @@
 #define LLVM_LIB_TARGET_LAMP_LAMPISELLOWERING_H
 
 #include "llvm/CodeGen/TargetLowering.h"
+#include <vector>
 
 namespace llvm {
 
@@ -35,9 +36,16 @@ public:
   TargetLowering::ConstraintType
   getConstraintType(StringRef Constraint) const override;
 
+  ConstraintWeight getSingleConstraintMatchWeight(
+      AsmOperandInfo &Info, const char *Constraint) const override;
+
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;
+
+  void LowerAsmOperandForConstraint(SDValue Op, StringRef Constraint,
+                                    std::vector<SDValue> &Ops,
+                                    SelectionDAG &DAG) const override;
 
   SDValue LowerCall(CallLoweringInfo &CLI,
                     SmallVectorImpl<SDValue> &InVals) const override;
@@ -49,6 +57,12 @@ public:
                                const SDLoc &DL,
                                SelectionDAG &DAG,
                                SmallVectorImpl<SDValue> &InVals) const override;
+
+  bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
+                      bool IsVarArg,
+                      const SmallVectorImpl<ISD::OutputArg> &Outs,
+                      LLVMContext &Context,
+                      const Type *RetTy) const override;
 
   SDValue LowerReturn(SDValue Chain,
                       CallingConv::ID CallConv,
