@@ -33,8 +33,10 @@ void LampInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                         const TargetRegisterClass *RC,
                                         Register VReg,
                                         MachineInstr::MIFlag Flags) const {
-  if (RC != &Lamp::GPRRegClass)
-    report_fatal_error("Lamp storeRegToStackSlot: unsupported reg class");
+  if (RC != &Lamp::GPRRegClass) {
+    assert(false && "Lamp storeRegToStackSlot: unsupported reg class");
+    return;
+  }
 
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
   MachineFunction &MF = *MBB.getParent();
@@ -61,8 +63,10 @@ void LampInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                          Register VReg,
                                          unsigned SubReg,
                                          MachineInstr::MIFlag Flags) const {
-  if (RC != &Lamp::GPRRegClass)
-    report_fatal_error("Lamp loadRegFromStackSlot: unsupported reg class");
+  if (RC != &Lamp::GPRRegClass) {
+    assert(false && "Lamp loadRegFromStackSlot: unsupported reg class");
+    return;
+  }
 
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
   MachineFunction &MF = *MBB.getParent();

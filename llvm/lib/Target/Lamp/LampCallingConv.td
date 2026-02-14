@@ -1,5 +1,7 @@
 def CC_Lamp : CallingConv<[
-  CCIfType<[i32], CCAssignToReg<[R0, R1, R2, R3, R4, R5, R6, R7]>>,
+  // For variadic calls/functions keep arguments stack-based to make va_list
+  // traversal straightforward in the initial ABI implementation.
+  CCIfNotVarArg<CCIfType<[i32], CCAssignToReg<[R0, R1, R2, R3, R4, R5, R6, R7]>>>,
   CCIfType<[i32], CCAssignToStack<4, 4>>
 ]>;
 

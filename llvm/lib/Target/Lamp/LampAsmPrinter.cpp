@@ -61,7 +61,7 @@ public:
   }
 
   bool lowerOperand(const MachineOperand &MO, MCOperand &OutMO) const {
-    if (MO.isImplicit())
+    if (MO.isReg() && MO.isImplicit())
       return false;
     switch (MO.getType()) {
     case MachineOperand::MO_Register:

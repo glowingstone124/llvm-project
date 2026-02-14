@@ -1,9 +1,11 @@
 #include "LampTargetMachine.h"
 #include "Lamp.h"
+#include "LampMachineFunctionInfo.h"
 #include "TargetInfo/LAMPTargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/Function.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Compiler.h"
 #include <optional>
@@ -58,4 +60,11 @@ public:
 
 TargetPassConfig *LampTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new LampPassConfig(*this, PM);
+}
+
+MachineFunctionInfo *LampTargetMachine::createMachineFunctionInfo(
+    BumpPtrAllocator &Allocator, const Function &F,
+    const TargetSubtargetInfo *STI) const {
+  return LampMachineFunctionInfo::create<LampMachineFunctionInfo>(Allocator, F,
+                                                                  STI);
 }

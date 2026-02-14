@@ -12,6 +12,9 @@ namespace {
 class LampMCAsmInfo : public llvm::MCAsmInfoELF {
 public:
   LampMCAsmInfo() {
+    // Keep MCAsmInfo consistent with Triple::getDefaultExceptionHandling()
+    // for Triple::lamp to satisfy target machine initialization checks.
+    ExceptionsType = llvm::ExceptionHandling::DwarfCFI;
     // Lamp now provides an MC asm parser; keep inline asm on the normal
     // integrated-assembler path for both .s output and object emission.
     UseIntegratedAssembler = true;

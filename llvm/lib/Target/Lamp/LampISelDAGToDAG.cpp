@@ -212,8 +212,7 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
           Base = materializeGPROp(Base, DL);
 
-          if (LD->getExtensionType() == ISD::NON_EXTLOAD &&
-              LD->getMemoryVT() == MVT::i32 &&
+          if (LD->getMemoryVT() == MVT::i32 &&
               LD->getValueType(0) == MVT::i32) {
             SDValue Ops[] = {Base, Offset, LD->getChain()};
             SDNode *Load32 = CurDAG->getMachineNode(
@@ -513,7 +512,7 @@ void LampDAGToDAGISel::Select(SDNode *N) {
       return SDValue(Sub, 0);
     };
     auto emitXorImm = [&](SDValue V, int64_t Imm) -> SDValue {
-      SDValue I = CurDAG->getTargetConstant(Imm, DL, MVT::i32);
+      SDValue I = CurDAG->getSignedTargetConstant(Imm, DL, MVT::i32);
       SDNode *X = CurDAG->getMachineNode(Lamp::XORI, DL, MVT::i32, V, I);
       return SDValue(X, 0);
     };
@@ -636,7 +635,7 @@ void LampDAGToDAGISel::Select(SDNode *N) {
     // Leave plain i16 loads to generic legalization/selection paths.
     // The custom byte-merge path here interacted badly with later zext/shl
     // uses and could introduce NOREG operands.
-    if (!LD->isIndexed() && LD->getExtensionType() == ISD::NON_EXTLOAD &&
+    if (!LD->isIndexed() &&
         LD->getMemoryVT() == MVT::i32 && LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {

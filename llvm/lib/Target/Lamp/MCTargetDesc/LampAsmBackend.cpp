@@ -69,8 +69,11 @@ public:
       return false;
 
     while (Count) {
-      const char HaltLE[8] = {0, 0, 0, 0, 0, 0, 0, 0x05};
-      OS.write(HaltLE, 8);
+      // NOP = mov r0, r0 (opcode 0x14), encoded little-endian in 64-bit slot.
+      // Never use HALT for alignment padding, otherwise execution may stop if
+      // control reaches aligned bytes.
+      const char NopLE[8] = {0, 0, 0, 0, 0, 0, 0, 0x14};
+      OS.write(NopLE, 8);
       Count -= 8;
     }
     return true;

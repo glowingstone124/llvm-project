@@ -3,9 +3,14 @@
 
 #include "LampSubtarget.h"
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
+#include "llvm/Support/Allocator.h"
 #include <optional>
 
 namespace llvm {
+
+class Function;
+struct MachineFunctionInfo;
+class TargetSubtargetInfo;
 
 class LampTargetMachine : public CodeGenTargetMachineImpl {
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
@@ -25,6 +30,9 @@ public:
   }
 
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+  MachineFunctionInfo *
+  createMachineFunctionInfo(BumpPtrAllocator &Allocator, const Function &F,
+                            const TargetSubtargetInfo *STI) const override;
 
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();

@@ -9,7 +9,8 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/EndianStream.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -47,9 +48,9 @@ public:
 private:
   MCContext &Ctx;
 
-  static uint8_t getOpcodeByte(unsigned Opc);
-  static LampInstForm getInstForm(unsigned Opc);
-  static bool isPCRelativeTargetOpcode(unsigned Opc);
+  uint8_t getOpcodeByte(unsigned Opc) const;
+  LampInstForm getInstForm(unsigned Opc) const;
+  bool isPCRelativeTargetOpcode(unsigned Opc) const;
 
   uint8_t encodeReg(const MCOperand &Op) const;
   uint32_t encodeImm(const MCOperand &Op, SmallVectorImpl<MCFixup> &Fixups,
@@ -57,7 +58,7 @@ private:
                      bool IsPCRel = false) const;
 };
 
-uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) {
+uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) const {
   switch (Opc) {
   case Lamp::ADD: return 0x01;
   case Lamp::SUB: return 0x02;
@@ -137,12 +138,12 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) {
   case Lamp::IPI: return 0x47;
   case Lamp::CPUID: return 0x48;
   default:
-    report_fatal_error("LampMCCodeEmitter: unknown opcode");
+    Ctx.reportError(SMLoc(), "LampMCCodeEmitter: unknown opcode");
     return 0;
   }
 }
 
-LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) {
+LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
   switch (Opc) {
   case Lamp::HALT:
   case Lamp::RET:
@@ -254,12 +255,12 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) {
     return LampInstForm::RsRs;
 
   default:
-    report_fatal_error("LampMCCodeEmitter: unknown instruction form");
+    Ctx.reportError(SMLoc(), "LampMCCodeEmitter: unknown instruction form");
     return LampInstForm::None;
   }
 }
 
-bool LampMCCodeEmitter::isPCRelativeTargetOpcode(unsigned Opc) {
+bool LampMCCodeEmitter::isPCRelativeTargetOpcode(unsigned Opc) const {
   switch (Opc) {
   case Lamp::RJMP:
   case Lamp::RCALL:
@@ -273,11 +274,13 @@ bool LampMCCodeEmitter::isPCRelativeTargetOpcode(unsigned Opc) {
 
 uint8_t LampMCCodeEmitter::encodeReg(const MCOperand &Op) const {
   if (!Op.isReg()) {
-    report_fatal_error("LampMCCodeEmitter: expected register operand");
+    Ctx.reportError(SMLoc(), "LampMCCodeEmitter: expected register operand");
+    return 0;
   }
   const MCRegisterInfo *MRI = Ctx.getRegisterInfo();
   if (!MRI) {
-    report_fatal_error("LampMCCodeEmitter: missing register info");
+    Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing register info");
+    return 0;
   }
   return static_cast<uint8_t>(MRI->getEncodingValue(Op.getReg()));
 }
@@ -286,13 +289,20 @@ uint32_t LampMCCodeEmitter::encodeImm(const MCOperand &Op,
                                       SmallVectorImpl<MCFixup> &Fixups,
                                       MCFixupKind Kind, bool IsPCRel) const {
   if (Op.isImm()) {
-    return static_cast<uint32_t>(Op.getImm());
+    const int64_t Val = Op.getImm();
+    if (!isInt<32>(Val) && !isUInt<32>(Val)) {
+      Ctx.reportError(SMLoc(),
+                      "LampMCCodeEmitter: immediate out of 32-bit range");
+      return 0;
+    }
+    return static_cast<uint32_t>(Val);
   }
   if (Op.isExpr()) {
     Fixups.push_back(MCFixup::create(0, Op.getExpr(), Kind, IsPCRel));
     return 0;
   }
-  report_fatal_error("LampMCCodeEmitter: expected immediate/expression operand");
+  Ctx.reportError(SMLoc(),
+                  "LampMCCodeEmitter: expected immediate/expression operand");
   return 0;
 }
 
@@ -309,6 +319,7 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
   uint32_t imm = 0;
 
   const unsigned NumOps = MI.getNumOperands();
+  bool HadError = false;
 
   auto dumpMI = [&]() {
     errs() << "LampMCCodeEmitter: opcode=" << MI.getOpcode()
@@ -331,12 +342,16 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
   auto encodeRegOperand = [&](unsigned I) -> uint8_t {
     if (I >= NumOps) {
       dumpMI();
-      report_fatal_error("LampMCCodeEmitter: missing register operand");
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing register operand");
+      HadError = true;
+      return 0;
     }
     const MCOperand &Op = MI.getOperand(I);
     if (!Op.isReg()) {
       dumpMI();
-      report_fatal_error("LampMCCodeEmitter: expected register operand");
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: expected register operand");
+      HadError = true;
+      return 0;
     }
     return encodeReg(Op);
   };
@@ -345,22 +360,28 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case LampInstForm::None:
     break;
   case LampInstForm::I:
-    if (NumOps < 1)
-      report_fatal_error("LampMCCodeEmitter: missing immediate operand");
+    if (NumOps < 1) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing immediate operand");
+      return;
+    }
     imm = encodeImm(MI.getOperand(0), Fixups);
     break;
   case LampInstForm::Target:
   case LampInstForm::Call:
-    if (NumOps < 1)
-      report_fatal_error("LampMCCodeEmitter: missing immediate operand");
+    if (NumOps < 1) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing immediate operand");
+      return;
+    }
     imm = encodeImm(MI.getOperand(0),
                     Fixups,
                     isPCRelativeTargetOpcode(MI.getOpcode()) ? Lamp::fixup_lamp_pc32 : Lamp::fixup_lamp_32,
                     isPCRelativeTargetOpcode(MI.getOpcode()));
     break;
   case LampInstForm::RsTarget:
-    if (NumOps < 2)
-      report_fatal_error("LampMCCodeEmitter: missing rs,target operands");
+    if (NumOps < 2) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing rs,target operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     imm = encodeImm(MI.getOperand(1),
                     Fixups,
@@ -368,19 +389,25 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
                     isPCRelativeTargetOpcode(MI.getOpcode()));
     break;
   case LampInstForm::Rd:
-    if (NumOps < 1)
-      report_fatal_error("LampMCCodeEmitter: missing rd operand");
+    if (NumOps < 1) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing rd operand");
+      return;
+    }
     rd = encodeRegOperand(0);
     break;
   case LampInstForm::RdImm:
-    if (NumOps < 2)
-      report_fatal_error("LampMCCodeEmitter: missing rd,imm operands");
+    if (NumOps < 2) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing rd,imm operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     imm = encodeImm(MI.getOperand(1), Fixups);
     break;
   case LampInstForm::RdRs:
-    if (NumOps < 1)
-      report_fatal_error("LampMCCodeEmitter: missing rd operand");
+    if (NumOps < 1) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing rd operand");
+      return;
+    }
     rd = encodeRegOperand(0);
     if (NumOps >= 2 && MI.getOperand(1).isReg())
       rs1 = encodeRegOperand(1);
@@ -388,55 +415,77 @@ void LampMCCodeEmitter::encodeInstruction(const MCInst &MI,
       rs1 = rd;
     break;
   case LampInstForm::RdRsRs:
-    if (NumOps < 3)
-      report_fatal_error("LampMCCodeEmitter: missing rd,rs1,rs2 operands");
+    if (NumOps < 3) {
+      Ctx.reportError(SMLoc(),
+                      "LampMCCodeEmitter: missing rd,rs1,rs2 operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     rs1 = encodeRegOperand(1);
     rs2 = encodeRegOperand(2);
     break;
   case LampInstForm::RsRs:
-    if (NumOps < 2)
-      report_fatal_error("LampMCCodeEmitter: missing rs,rs1 operands");
+    if (NumOps < 2) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing rs,rs1 operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     rs1 = encodeRegOperand(1);
     break;
   case LampInstForm::RsImm:
-    if (NumOps < 2)
-      report_fatal_error("LampMCCodeEmitter: missing rs,imm operands");
+    if (NumOps < 2) {
+      Ctx.reportError(SMLoc(), "LampMCCodeEmitter: missing rs,imm operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     imm = encodeImm(MI.getOperand(1), Fixups);
     break;
   case LampInstForm::RdRsImm:
-    if (NumOps < 3)
-      report_fatal_error("LampMCCodeEmitter: missing rd,rs1,imm operands");
+    if (NumOps < 3) {
+      Ctx.reportError(SMLoc(),
+                      "LampMCCodeEmitter: missing rd,rs1,imm operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     rs1 = encodeRegOperand(1);
     imm = encodeImm(MI.getOperand(2), Fixups);
     break;
   case LampInstForm::RsRsImm:
-    if (NumOps < 3)
-      report_fatal_error("LampMCCodeEmitter: missing rs,rs1,imm operands");
+    if (NumOps < 3) {
+      Ctx.reportError(SMLoc(),
+                      "LampMCCodeEmitter: missing rs,rs1,imm operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     rs1 = encodeRegOperand(1);
     imm = encodeImm(MI.getOperand(2), Fixups);
     break;
   case LampInstForm::RdRsRsImm:
-    if (NumOps < 4)
-      report_fatal_error("LampMCCodeEmitter: missing rd,rs1,rs2,imm operands");
+    if (NumOps < 4) {
+      Ctx.reportError(SMLoc(),
+                      "LampMCCodeEmitter: missing rd,rs1,rs2,imm operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     rs1 = encodeRegOperand(1);
     rs2 = encodeRegOperand(2);
     imm = encodeImm(MI.getOperand(3), Fixups);
     break;
   case LampInstForm::RdRsRsRsImm:
-    if (NumOps < 4)
-      report_fatal_error("LampMCCodeEmitter: missing rd,rs1,rs2,imm operands");
+    if (NumOps < 4) {
+      Ctx.reportError(SMLoc(),
+                      "LampMCCodeEmitter: missing rd,rs1,rs2,imm operands");
+      return;
+    }
     rd = encodeRegOperand(0);
     rs1 = encodeRegOperand(1);
     rs2 = encodeRegOperand(2);
     imm = encodeImm(MI.getOperand(NumOps >= 5 ? 4 : 3), Fixups);
     break;
   }
+
+  if (HadError)
+    return;
 
   uint64_t Enc = (static_cast<uint64_t>(opcode) << 56) |
                  (static_cast<uint64_t>(rd) << 48) |

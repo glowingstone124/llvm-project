@@ -1,4 +1,5 @@
 #include "LampISelLowering.h"
+#include "LampMachineFunctionInfo.h"
 #include "LampSubtarget.h"
 #include "MCTargetDesc/LampMCTargetDesc.h"
 #include "LampTargetMachine.h"
@@ -6,12 +7,62 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/Support/MathExtras.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "lamp-lower"
 
 #include "LampGenCallingConv.inc"
+
+static SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) {
+  MachineFunction &MF = DAG.getMachineFunction();
+  auto *FuncInfo = MF.getInfo<LampMachineFunctionInfo>();
+  if (!FuncInfo->hasVarArgsFrameIndex())
+    return Op.getOperand(0);
+
+  SDValue Ptr = Op.getOperand(1);
+  EVT PtrVT = Ptr.getValueType();
+  SDValue FrameIndex = DAG.getFrameIndex(FuncInfo->getVarArgsFrameIndex(), PtrVT);
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  return DAG.getStore(Op.getOperand(0), SDLoc(Op), FrameIndex, Ptr,
+                      MachinePointerInfo(SV));
+}
+
+static SDValue lowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) {
+  SDLoc DL(Op);
+  EVT PtrVT = Op.getValueType();
+
+  SDValue Chain = Op.getOperand(0);
+  SDValue Size = Op.getOperand(1);
+  SDValue AlignOp = Op.getOperand(2);
+
+  if (Size.getValueType() != PtrVT)
+    Size = DAG.getZExtOrTrunc(Size, DL, PtrVT);
+
+  uint64_t Align = 4;
+  if (const auto *CN = dyn_cast<ConstantSDNode>(AlignOp)) {
+    const uint64_t Requested = CN->getZExtValue();
+    if (Requested != 0 && isPowerOf2_64(Requested))
+      Align = std::max<uint64_t>(Align, Requested);
+  }
+
+  if (Align > 1) {
+    SDValue AlignMinus1 = DAG.getConstant(Align - 1, DL, PtrVT);
+    SDValue AlignMask = DAG.getSignedConstant(-static_cast<int64_t>(Align), DL,
+                                              PtrVT);
+    Size = DAG.getNode(ISD::ADD, DL, PtrVT, Size, AlignMinus1);
+    Size = DAG.getNode(ISD::AND, DL, PtrVT, Size, AlignMask);
+  }
+
+  SDValue SP = DAG.getCopyFromReg(Chain, DL, Lamp::R30, PtrVT);
+  Chain = SP.getValue(1);
+  SDValue NewSP = DAG.getNode(ISD::SUB, DL, PtrVT, SP, Size);
+  Chain = DAG.getCopyToReg(Chain, DL, Lamp::R30, NewSP);
+
+  SDValue Ops[2] = {NewSP, Chain};
+  return DAG.getMergeValues(Ops, DL);
+}
 
 LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
                                        const LampSubtarget &STI)
@@ -40,6 +91,11 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   setOperationAction(ISD::ATOMIC_LOAD_ADD, MVT::i32, Custom);
   setOperationAction(ISD::ATOMIC_LOAD, MVT::i32, Custom);
   setOperationAction(ISD::ATOMIC_STORE, MVT::i32, Custom);
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
+  setOperationAction(ISD::VAARG, MVT::Other, Expand);
+  setOperationAction(ISD::VAEND, MVT::Other, Expand);
+  setOperationAction(ISD::VACOPY, MVT::Other, Expand);
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Custom);
   computeRegisterProperties(STI.getRegisterInfo());
   setStackPointerRegisterToSaveRestore(Lamp::R30);
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -49,6 +105,10 @@ SDValue LampTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
   SDLoc DL(Op);
   switch (Op.getOpcode()) {
+  case ISD::DYNAMIC_STACKALLOC:
+    return lowerDYNAMIC_STACKALLOC(Op, DAG);
+  case ISD::VASTART:
+    return lowerVASTART(Op, DAG);
   case ISD::ATOMIC_FENCE:
     return DAG.getNode(LampISD::FENCE, DL, MVT::Other, Op.getOperand(0));
   case ISD::ATOMIC_SWAP: {
@@ -189,6 +249,50 @@ SDValue LampTargetLowering::LowerCall(
     Chain = DAG.getCopyToReg(Chain, DL, Reg, Val);
   }
 
+  // CALL/RCALL model argument registers R0..R7 as implicit uses.
+  // Seed the ones not used for this call with undef so verifier/liveness
+  // does not observe undefined physical-register uses.
+  bool UsedArgReg[8] = {false, false, false, false,
+                        false, false, false, false};
+  for (const auto &[Reg, Val] : RegsToPass) {
+    (void)Val;
+    switch (Reg.id()) {
+    case Lamp::R0:
+      UsedArgReg[0] = true;
+      break;
+    case Lamp::R1:
+      UsedArgReg[1] = true;
+      break;
+    case Lamp::R2:
+      UsedArgReg[2] = true;
+      break;
+    case Lamp::R3:
+      UsedArgReg[3] = true;
+      break;
+    case Lamp::R4:
+      UsedArgReg[4] = true;
+      break;
+    case Lamp::R5:
+      UsedArgReg[5] = true;
+      break;
+    case Lamp::R6:
+      UsedArgReg[6] = true;
+      break;
+    case Lamp::R7:
+      UsedArgReg[7] = true;
+      break;
+    default:
+      break;
+    }
+  }
+  static constexpr unsigned ArgRegs[8] = {Lamp::R0, Lamp::R1, Lamp::R2, Lamp::R3,
+                                          Lamp::R4, Lamp::R5, Lamp::R6, Lamp::R7};
+  for (unsigned I = 0; I < 8; ++I) {
+    if (!UsedArgReg[I]) {
+      Chain = DAG.getCopyToReg(Chain, DL, ArgRegs[I], DAG.getUNDEF(MVT::i32));
+    }
+  }
+
   unsigned CallOpc = LampISD::CALL;
   if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
     Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32);
@@ -238,6 +342,12 @@ SDValue LampTargetLowering::LowerFormalArguments(
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_Lamp);
+
+  if (IsVarArg) {
+    unsigned Offset = CCInfo.getStackSize();
+    int FI = MF.getFrameInfo().CreateFixedObject(4, Offset, true);
+    MF.getInfo<LampMachineFunctionInfo>()->setVarArgsFrameIndex(FI);
+  }
 
   for (CCValAssign &VA : ArgLocs) {
     if (VA.isRegLoc()) {

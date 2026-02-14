@@ -16,7 +16,7 @@ LampRegisterInfo::LampRegisterInfo() : LampGenRegisterInfo(Lamp::R0) {}
 
 const MCPhysReg *
 LampRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  static const MCPhysReg CalleeSavedRegs[] = {0};
+  static const MCPhysReg CalleeSavedRegs[] = {Lamp::R31, 0};
   return CalleeSavedRegs;
 }
 
@@ -53,5 +53,6 @@ bool LampRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 }
 
 Register LampRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
-  return Lamp::R30;
+  return MF.getSubtarget().getFrameLowering()->hasFP(MF) ? Lamp::R31
+                                                          : Lamp::R30;
 }

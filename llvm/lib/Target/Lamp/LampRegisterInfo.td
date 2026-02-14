@@ -1,4 +1,4 @@
-class LampReg<string n, int enc> : Register<n> {
+class LampReg<string n, int enc> : Register<n>, DwarfRegNum<[enc]> {
   let HWEncoding = enc;
   let Namespace = "Lamp";
 }
