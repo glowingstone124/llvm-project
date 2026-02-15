@@ -92,6 +92,14 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
     setOperationAction(ISD::SELECT_CC, VT, Promote);
   }
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
+  // Lamp has no native rotate/funnel-shift instructions.
+  // Force legalizer expansion so these never reach DAG isel.
+  for (MVT VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::ROTL, VT, Expand);
+    setOperationAction(ISD::ROTR, VT, Expand);
+    setOperationAction(ISD::FSHL, VT, Expand);
+    setOperationAction(ISD::FSHR, VT, Expand);
+  }
 
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
   setOperationAction(ISD::ATOMIC_CMP_SWAP, MVT::i32, Custom);
