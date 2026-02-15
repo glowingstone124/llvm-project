@@ -74,6 +74,52 @@ static SDValue lowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) {
   return DAG.getMergeValues(Ops, DL);
 }
 
+static SDValue lowerMULHU(SDValue Op, SelectionDAG &DAG) {
+  SDLoc DL(Op);
+  EVT VT = Op.getValueType();
+  SDValue A = Op.getOperand(0);
+  SDValue B = Op.getOperand(1);
+
+  SDValue Mask16 = DAG.getConstant(0xFFFFu, DL, VT);
+  SDValue Shift16 = DAG.getConstant(16, DL, VT);
+
+  SDValue ALo = DAG.getNode(ISD::AND, DL, VT, A, Mask16);
+  SDValue AHi = DAG.getNode(ISD::SRL, DL, VT, A, Shift16);
+  SDValue BLo = DAG.getNode(ISD::AND, DL, VT, B, Mask16);
+  SDValue BHi = DAG.getNode(ISD::SRL, DL, VT, B, Shift16);
+
+  SDValue P0 = DAG.getNode(ISD::MUL, DL, VT, ALo, BLo);
+  SDValue T = DAG.getNode(ISD::SRL, DL, VT, P0, Shift16);
+
+  SDValue U = DAG.getNode(
+      ISD::ADD, DL, VT, DAG.getNode(ISD::MUL, DL, VT, AHi, BLo), T);
+  SDValue V = DAG.getNode(
+      ISD::ADD, DL, VT, DAG.getNode(ISD::MUL, DL, VT, ALo, BHi),
+      DAG.getNode(ISD::AND, DL, VT, U, Mask16));
+
+  SDValue Hi = DAG.getNode(
+      ISD::ADD, DL, VT, DAG.getNode(ISD::MUL, DL, VT, AHi, BHi),
+      DAG.getNode(ISD::SRL, DL, VT, U, Shift16));
+  return DAG.getNode(ISD::ADD, DL, VT, Hi,
+                     DAG.getNode(ISD::SRL, DL, VT, V, Shift16));
+}
+
+static SDValue lowerMULHS(SDValue Op, SelectionDAG &DAG) {
+  SDLoc DL(Op);
+  EVT VT = Op.getValueType();
+  SDValue A = Op.getOperand(0);
+  SDValue B = Op.getOperand(1);
+
+  SDValue UHi = lowerMULHU(Op, DAG);
+  SDValue Shift31 = DAG.getConstant(31, DL, VT);
+  SDValue SignA = DAG.getNode(ISD::SRA, DL, VT, A, Shift31);
+  SDValue SignB = DAG.getNode(ISD::SRA, DL, VT, B, Shift31);
+  SDValue CorrA = DAG.getNode(ISD::AND, DL, VT, SignA, B);
+  SDValue CorrB = DAG.getNode(ISD::AND, DL, VT, SignB, A);
+  SDValue Corr = DAG.getNode(ISD::ADD, DL, VT, CorrA, CorrB);
+  return DAG.getNode(ISD::SUB, DL, VT, UHi, Corr);
+}
+
 LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
                                        const LampSubtarget &STI)
     : TargetLowering(TM, STI) {
@@ -85,7 +131,8 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   // arithmetic out of ISel by promoting it to i32 first.
   for (MVT VT : {MVT::i8, MVT::i16}) {
     for (unsigned Opc : {ISD::ADD, ISD::SUB, ISD::MUL, ISD::SHL, ISD::SRL,
-                         ISD::SRA, ISD::AND, ISD::OR, ISD::XOR}) {
+                         ISD::SRA, ISD::ROTL, ISD::ROTR, ISD::AND, ISD::OR,
+                         ISD::XOR}) {
       setOperationAction(Opc, VT, Promote);
     }
     setOperationAction(ISD::SETCC, VT, Promote);
@@ -93,11 +140,16 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
     setOperationAction(ISD::SELECT_CC, VT, Promote);
   }
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
-  // Lamp has no native rotate/funnel-shift instructions.
+  // We only have low-part integer multiply in hardware.
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::MULHU, MVT::i32, Custom);
+  setOperationAction(ISD::MULHS, MVT::i32, Custom);
+  setOperationAction(ISD::ROTL, MVT::i32, Legal);
+  setOperationAction(ISD::ROTR, MVT::i32, Legal);
+  // Lamp has no native funnel-shift instructions.
   // Force legalizer expansion so these never reach DAG isel.
   for (MVT VT : {MVT::i8, MVT::i16, MVT::i32}) {
-    setOperationAction(ISD::ROTL, VT, Expand);
-    setOperationAction(ISD::ROTR, VT, Expand);
     setOperationAction(ISD::FSHL, VT, Expand);
     setOperationAction(ISD::FSHR, VT, Expand);
   }
@@ -122,6 +174,17 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   // Lamp has no indirect branch instruction, so force switch lowering away
   // from jump tables.
   setMinimumJumpTableEntries(UINT_MAX);
+
+  // `lamp-unknown-unknown` has no predefined runtime set; wire up the
+  // integer div/rem libcalls to compiler-rt entry points.
+  if (getLibcallImpl(RTLIB::UDIV_I64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::UDIV_I64, RTLIB::impl___udivdi3);
+  if (getLibcallImpl(RTLIB::UREM_I64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::UREM_I64, RTLIB::impl___umoddi3);
+  if (getLibcallImpl(RTLIB::SDIV_I64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::SDIV_I64, RTLIB::impl___divdi3);
+  if (getLibcallImpl(RTLIB::SREM_I64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::SREM_I64, RTLIB::impl___moddi3);
 }
 
 SDValue LampTargetLowering::LowerOperation(SDValue Op,
@@ -132,6 +195,10 @@ SDValue LampTargetLowering::LowerOperation(SDValue Op,
     return lowerDYNAMIC_STACKALLOC(Op, DAG);
   case ISD::VASTART:
     return lowerVASTART(Op, DAG);
+  case ISD::MULHU:
+    return lowerMULHU(Op, DAG);
+  case ISD::MULHS:
+    return lowerMULHS(Op, DAG);
   case ISD::ATOMIC_FENCE:
     return DAG.getNode(LampISD::FENCE, DL, MVT::Other, Op.getOperand(0));
   case ISD::ATOMIC_SWAP: {

@@ -98,6 +98,8 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) const {
   case Lamp::SHL: return 0x21;
   case Lamp::SHR: return 0x22;
   case Lamp::SAR: return 0x23;
+  case Lamp::ROL: return 0x4E;
+  case Lamp::ROR: return 0x4F;
   case Lamp::JNZ: return 0x24;
   case Lamp::RJZ: return 0x4C;
   case Lamp::RJNZ: return 0x4D;
@@ -127,6 +129,8 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) const {
   case Lamp::XORI: return 0x3C;
   case Lamp::SHLI: return 0x3D;
   case Lamp::SHRI: return 0x3E;
+  case Lamp::ROLI: return 0x50;
+  case Lamp::RORI: return 0x51;
   case Lamp::CAS: return 0x3F;
   case Lamp::XADD: return 0x40;
   case Lamp::XCHG: return 0x41;
@@ -203,6 +207,8 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
   case Lamp::SHL:
   case Lamp::SHR:
   case Lamp::SAR:
+  case Lamp::ROL:
+  case Lamp::ROR:
   case Lamp::FADD:
   case Lamp::FSUB:
   case Lamp::FMUL:
@@ -224,6 +230,8 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
   case Lamp::XORI:
   case Lamp::SHLI:
   case Lamp::SHRI:
+  case Lamp::ROLI:
+  case Lamp::RORI:
   case Lamp::LDAR:
     return LampInstForm::RdRsImm;
 

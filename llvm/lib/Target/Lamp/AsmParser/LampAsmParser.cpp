@@ -421,6 +421,10 @@ bool LampAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &,
     OK = rri(Lamp::SHLI);
   } else if (Mn == "shri") {
     OK = rri(Lamp::SHRI);
+  } else if (Mn == "roli") {
+    OK = rri(Lamp::ROLI);
+  } else if (Mn == "rori") {
+    OK = rri(Lamp::RORI);
   } else if (Mn == "cmpi") {
     OK = ri(Lamp::CMPI);
   } else if (Mn == "cmp") {
@@ -439,6 +443,10 @@ bool LampAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &,
     OK = rrr(Lamp::SHR);
   } else if (Mn == "sar") {
     OK = rrr(Lamp::SAR);
+  } else if (Mn == "rol") {
+    OK = rrr(Lamp::ROL);
+  } else if (Mn == "ror") {
+    OK = rrr(Lamp::ROR);
   } else if (Mn == "sub") {
     OK = rrr(Lamp::SUB);
   } else if (Mn == "add") {

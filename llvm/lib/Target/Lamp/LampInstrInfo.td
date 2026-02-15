@@ -144,6 +144,8 @@ def XOR : LampInstRdRsRs<"xor", 0x1F>;
 def SHL : LampInstRdRsRs<"shl", 0x21>;
 def SHR : LampInstRdRsRs<"shr", 0x22>;
 def SAR : LampInstRdRsRs<"sar", 0x23>;
+def ROL : LampInstRdRsRs<"rol", 0x4E>;
+def ROR : LampInstRdRsRs<"ror", 0x4F>;
 
 def CMP  : LampInstRsRs<"cmp", 0x12> {
   let Defs = [FLAGS];
@@ -180,6 +182,8 @@ def ORI     : LampInstRdRsImm<"ori",     0x3B>;
 def XORI    : LampInstRdRsImm<"xori",    0x3C>;
 def SHLI    : LampInstRdRsImm<"shli",    0x3D>;
 def SHRI    : LampInstRdRsImm<"shri",    0x3E>;
+def ROLI    : LampInstRdRsImm<"roli",    0x50>;
+def RORI    : LampInstRdRsImm<"rori",    0x51>;
 
 def LOADX32  : LampInstRdRsRsImm<"loadx32",  0x0E>;
 def STOREX32 : LampInstRdRsRsImm<"storex32", 0x11>;
@@ -289,8 +293,12 @@ def : Pat<(urem i32:$lhs, simm32:$imm), (MOD GPR:$lhs, (MOVI simm32:$imm))>;
 def : Pat<(shl i32:$lhs, i32:$rhs), (SHL GPR:$lhs, GPR:$rhs)>;
 def : Pat<(srl i32:$lhs, i32:$rhs), (SHR GPR:$lhs, GPR:$rhs)>;
 def : Pat<(sra i32:$lhs, i32:$rhs), (SAR GPR:$lhs, GPR:$rhs)>;
+def : Pat<(rotl i32:$lhs, i32:$rhs), (ROL GPR:$lhs, GPR:$rhs)>;
+def : Pat<(rotr i32:$lhs, i32:$rhs), (ROR GPR:$lhs, GPR:$rhs)>;
 def : Pat<(shl i32:$lhs, simm32:$imm), (SHLI GPR:$lhs, simm32:$imm)>;
 def : Pat<(srl i32:$lhs, simm32:$imm), (SHRI GPR:$lhs, simm32:$imm)>;
+def : Pat<(rotl i32:$lhs, simm32:$imm), (ROLI GPR:$lhs, simm32:$imm)>;
+def : Pat<(rotr i32:$lhs, simm32:$imm), (RORI GPR:$lhs, simm32:$imm)>;
 def : Pat<(i32 simm32:$imm), (MOVI simm32:$imm)>;
 
 def : Pat<(seteq i32:$lhs, i32:$rhs),
