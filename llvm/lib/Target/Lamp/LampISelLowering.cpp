@@ -10,6 +10,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/MathExtras.h"
+#include <climits>
 
 using namespace llvm;
 
@@ -114,9 +115,13 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   setOperationAction(ISD::VACOPY, MVT::Other, Expand);
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Custom);
   setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
+  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
   computeRegisterProperties(STI.getRegisterInfo());
   setStackPointerRegisterToSaveRestore(Lamp::R30);
   setBooleanContents(ZeroOrOneBooleanContent);
+  // Lamp has no indirect branch instruction, so force switch lowering away
+  // from jump tables.
+  setMinimumJumpTableEntries(UINT_MAX);
 }
 
 SDValue LampTargetLowering::LowerOperation(SDValue Op,
