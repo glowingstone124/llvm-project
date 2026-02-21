@@ -6,6 +6,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/TargetRegistry.h"
 
@@ -36,6 +37,10 @@ public:
       return;
     case MachineOperand::MO_GlobalAddress:
       getSymbol(MO.getGlobal())->print(OS, MAI);
+      if (MO.getOffset() > 0)
+        OS << '+' << MO.getOffset();
+      else if (MO.getOffset() < 0)
+        OS << MO.getOffset();
       return;
     case MachineOperand::MO_ExternalSymbol:
       GetExternalSymbolSymbol(MO.getSymbolName())->print(OS, MAI);
@@ -61,6 +66,19 @@ public:
   }
 
   bool lowerOperand(const MachineOperand &MO, MCOperand &OutMO) const {
+    auto lowerSymbolExpr = [&](const MachineOperand &SymMO,
+                               const MCSymbol *Sym) -> const MCExpr * {
+      const MCExpr *Expr = MCSymbolRefExpr::create(Sym, OutContext);
+      const int64_t Off = SymMO.getOffset();
+      if (Off > 0)
+        Expr = MCBinaryExpr::createAdd(
+            Expr, MCConstantExpr::create(Off, OutContext), OutContext);
+      else if (Off < 0)
+        Expr = MCBinaryExpr::createSub(
+            Expr, MCConstantExpr::create(-Off, OutContext), OutContext);
+      return Expr;
+    };
+
     if (MO.isReg() && MO.isImplicit())
       return false;
     switch (MO.getType()) {
@@ -76,12 +94,11 @@ public:
       return true;
     case MachineOperand::MO_GlobalAddress:
       OutMO = MCOperand::createExpr(
-          MCSymbolRefExpr::create(getSymbol(MO.getGlobal()), OutContext));
+          lowerSymbolExpr(MO, getSymbol(MO.getGlobal())));
       return true;
     case MachineOperand::MO_ExternalSymbol:
       OutMO = MCOperand::createExpr(
-          MCSymbolRefExpr::create(GetExternalSymbolSymbol(MO.getSymbolName()),
-                                  OutContext));
+          lowerSymbolExpr(MO, GetExternalSymbolSymbol(MO.getSymbolName())));
       return true;
     default:
       return false;

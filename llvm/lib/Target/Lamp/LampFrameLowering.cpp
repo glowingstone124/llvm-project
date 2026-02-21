@@ -27,8 +27,17 @@ void LampFrameLowering::emitPrologue(MachineFunction &MF,
         .addImm(StackSize);
   }
   if (HasFP) {
-    BuildMI(MBB, InsertPt, DL, TII.get(Lamp::MOV), Lamp::R31)
-        .addReg(Lamp::R30);
+    // Save caller FP below the fixed frame and establish a stable frame base.
+    BuildMI(MBB, InsertPt, DL, TII.get(Lamp::SUBI), Lamp::R30)
+        .addReg(Lamp::R30)
+        .addImm(4);
+    BuildMI(MBB, InsertPt, DL, TII.get(Lamp::STORE32))
+        .addReg(Lamp::R31)
+        .addReg(Lamp::R30)
+        .addImm(0);
+    BuildMI(MBB, InsertPt, DL, TII.get(Lamp::ADDI), Lamp::R31)
+        .addReg(Lamp::R30)
+        .addImm(4);
   }
 }
 
@@ -47,6 +56,9 @@ void LampFrameLowering::emitEpilogue(MachineFunction &MF,
   if (HasFP) {
     BuildMI(MBB, InsertPt, DL, TII.get(Lamp::MOV), Lamp::R30)
         .addReg(Lamp::R31);
+    BuildMI(MBB, InsertPt, DL, TII.get(Lamp::LOAD32), Lamp::R31)
+        .addReg(Lamp::R30)
+        .addImm(-4);
   }
   if (StackSize != 0) {
     BuildMI(MBB, InsertPt, DL, TII.get(Lamp::ADDI), Lamp::R30)
@@ -57,8 +69,7 @@ void LampFrameLowering::emitEpilogue(MachineFunction &MF,
 
 bool LampFrameLowering::hasFPImpl(const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
-  // Lamp currently does not preserve an incoming caller FP (R31) in prologue/
-  // epilogue. Until full callee-save + CFA semantics are wired up, avoid
-  // forcing FP at -O0 and only require it for variable-sized stack frames.
-  return MFI.hasVarSizedObjects();
+  // Calls with outgoing stack arguments temporarily move SP in LowerCall.
+  // Keep frame indices stable by anchoring them to FP in any non-leaf frame.
+  return MFI.hasVarSizedObjects() || MFI.hasCalls();
 }
