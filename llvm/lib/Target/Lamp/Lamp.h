@@ -11,6 +11,7 @@ class PassRegistry;
 class Target;
 
 FunctionPass *createLampISelDag(LampTargetMachine &TM, CodeGenOptLevel OptLevel);
+FunctionPass *createLampZeroBranchPrepPass();
 
 void initializeLampDAGToDAGISelLegacyPass(PassRegistry &);
 

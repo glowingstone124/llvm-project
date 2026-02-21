@@ -384,9 +384,10 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         V.getOpcode() == ISD::TargetGlobalAddress ||
         V.getOpcode() == ISD::TargetExternalSymbol) {
       SDValue Sym;
-      if (isa<GlobalAddressSDNode>(V))
-        Sym = CurDAG->getTargetGlobalAddress(
-            cast<GlobalAddressSDNode>(V)->getGlobal(), DL, MVT::i32);
+      if (auto *GA = dyn_cast<GlobalAddressSDNode>(V))
+        Sym = CurDAG->getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i32,
+                                             GA->getOffset(),
+                                             GA->getTargetFlags());
       else if (isa<ExternalSymbolSDNode>(V))
         Sym = CurDAG->getTargetExternalSymbol(
             cast<ExternalSymbolSDNode>(V)->getSymbol(), MVT::i32);
@@ -462,8 +463,9 @@ void LampDAGToDAGISel::Select(SDNode *N) {
           CurDAG->getMachineFunction().getFunction(),
           "TLS is not supported on the Lamp target", SDLoc(N).getDebugLoc()));
     }
-    SDValue TGA =
-        CurDAG->getTargetGlobalAddress(GA->getGlobal(), SDLoc(N), MVT::i32);
+    SDValue TGA = CurDAG->getTargetGlobalAddress(GA->getGlobal(), SDLoc(N),
+                                                 MVT::i32, GA->getOffset(),
+                                                 GA->getTargetFlags());
     CurDAG->SelectNodeTo(N, Lamp::MOVI, MVT::i32, TGA);
     return;
   }
@@ -764,9 +766,10 @@ void LampDAGToDAGISel::Select(SDNode *N) {
           V.getOpcode() == ISD::TargetGlobalAddress ||
           V.getOpcode() == ISD::TargetExternalSymbol) {
         SDValue Sym;
-        if (isa<GlobalAddressSDNode>(V))
-          Sym = CurDAG->getTargetGlobalAddress(
-              cast<GlobalAddressSDNode>(V)->getGlobal(), DL, MVT::i32);
+        if (auto *GA = dyn_cast<GlobalAddressSDNode>(V))
+          Sym = CurDAG->getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i32,
+                                               GA->getOffset(),
+                                               GA->getTargetFlags());
         else if (isa<ExternalSymbolSDNode>(V))
           Sym = CurDAG->getTargetExternalSymbol(
               cast<ExternalSymbolSDNode>(V)->getSymbol(), MVT::i32);
@@ -867,15 +870,6 @@ void LampDAGToDAGISel::Select(SDNode *N) {
       if (Info.SwapCompareOperands)
         std::swap(LHS, RHS);
 
-      if (isZeroBranchOpcode(Info.BrOpc) &&
-          isa<ConstantSDNode>(RHS) && cast<ConstantSDNode>(RHS)->isZero()) {
-        if (LHS.getValueType() != MVT::i32)
-          LHS = CurDAG->getZExtOrTrunc(LHS, DL, MVT::i32);
-        SDValue Ops[] = {LHS, Dest, Chain};
-        CurDAG->SelectNodeTo(N, Info.BrOpc, MVT::Other, Ops);
-        return;
-      }
-
       if (auto *CL = dyn_cast<ConstantSDNode>(LHS)) {
         SDValue Imm =
             CurDAG->getSignedTargetConstant(CL->getSExtValue(), DL, MVT::i32);
@@ -961,15 +955,6 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         if (Info.SwapCompareOperands)
           std::swap(LHS, RHS);
 
-        if (isZeroBranchOpcode(Info.BrOpc) &&
-            isa<ConstantSDNode>(RHS) && cast<ConstantSDNode>(RHS)->isZero()) {
-          if (LHS.getValueType() != MVT::i32)
-            LHS = CurDAG->getZExtOrTrunc(LHS, DL, MVT::i32);
-          SDValue Ops[] = {LHS, Dest, Chain};
-          CurDAG->SelectNodeTo(N, Info.BrOpc, MVT::Other, Ops);
-          return;
-        }
-
         if (auto *CL = dyn_cast<ConstantSDNode>(LHS)) {
           SDValue Imm = CurDAG->getSignedTargetConstant(CL->getSExtValue(), DL,
                                                         MVT::i32);
@@ -1029,8 +1014,16 @@ void LampDAGToDAGISel::Select(SDNode *N) {
       }
     }
 
-    SDValue Ops[] = {Cond, N->getOperand(2), N->getOperand(0)};
-    CurDAG->SelectNodeTo(N, BrOpc, MVT::Other, Ops);
+    {
+      SDLoc DL(N);
+      SDValue C = materializeGPROp(Cond, DL);
+      if (C.getValueType() != MVT::i32)
+        C = CurDAG->getZExtOrTrunc(C, DL, MVT::i32);
+      SDValue Zero = CurDAG->getSignedTargetConstant(0, DL, MVT::i32);
+      SDNode *CmpZero = CurDAG->getMachineNode(Lamp::SUBI, DL, MVT::i32, C, Zero);
+      SDValue Ops[] = {SDValue(CmpZero, 0), N->getOperand(2), N->getOperand(0)};
+      CurDAG->SelectNodeTo(N, BrOpc, MVT::Other, Ops);
+    }
     return;
   }
 
@@ -1128,9 +1121,10 @@ bool LampDAGToDAGISel::SelectAddr(SDValue Addr, SDValue &Base,
     }
 
     SDValue Sym;
-    if (isa<GlobalAddressSDNode>(Addr))
-      Sym = CurDAG->getTargetGlobalAddress(
-          cast<GlobalAddressSDNode>(Addr)->getGlobal(), DL, MVT::i32);
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+      Sym = CurDAG->getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i32,
+                                           GA->getOffset(),
+                                           GA->getTargetFlags());
     else if (isa<ExternalSymbolSDNode>(Addr))
       Sym = CurDAG->getTargetExternalSymbol(
           cast<ExternalSymbolSDNode>(Addr)->getSymbol(), MVT::i32);

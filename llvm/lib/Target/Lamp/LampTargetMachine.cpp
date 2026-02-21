@@ -55,6 +55,12 @@ public:
     addPass(createLampISelDag(getLampTargetMachine(), getOptLevel()));
     return false;
   }
+
+  void addPreEmitPass() override {
+    // ISA spec requires JZ/JNZ/RJZ/RJNZ to observe ZF.
+    // Ensure zero branches always have a local flags-producing instruction.
+    addPass(createLampZeroBranchPrepPass());
+  }
 };
 } // namespace
 
