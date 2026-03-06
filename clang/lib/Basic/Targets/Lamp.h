@@ -23,7 +23,7 @@ class LLVM_LIBRARY_VISIBILITY LampTargetInfo : public TargetInfo {
 public:
   LampTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    TLSSupported = false;
+    TLSSupported = true;
     IntWidth = IntAlign = 32;
     LongWidth = LongAlign = 32;
     LongLongWidth = LongLongAlign = 64;

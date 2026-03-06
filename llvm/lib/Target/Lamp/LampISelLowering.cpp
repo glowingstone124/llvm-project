@@ -238,6 +238,9 @@ SDValue LampTargetLowering::LowerOperation(SDValue Op,
                                    AN->getMemoryVT(), AN->getMemOperand());
   }
   case ISD::GlobalTLSAddress:
+    if (DAG.getTarget().useEmulatedTLS())
+      return LowerToTLSEmulatedModel(cast<GlobalAddressSDNode>(Op), DAG);
+
     diagnoseUnsupported(DL, DAG, "TLS is not supported on the Lamp target");
     return DAG.getUNDEF(Op.getValueType());
   default:

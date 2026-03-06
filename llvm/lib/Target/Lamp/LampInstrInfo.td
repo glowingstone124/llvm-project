@@ -163,10 +163,14 @@ def FTOI : LampInstRdRs<"ftoi", 0x34>;
 
 let mayLoad = 1 in {
   def LOAD    : LampInstRdRsImm<"load",    0x0C>;
+  def LOAD16  : LampInstRdRsImm<"load16",  0x52>;
+  def LOADS8  : LampInstRdRsImm<"loads8",  0x54>;
+  def LOADS16 : LampInstRdRsImm<"loads16", 0x55>;
   def LOAD32  : LampInstRdRsImm<"load32",  0x0D>;
 }
 let mayStore = 1 in {
   def STORE   : LampInstRsRsImm<"store",   0x0F>;
+  def STORE16 : LampInstRsRsImm<"store16", 0x53>;
   def STORE32 : LampInstRsRsImm<"store32", 0x10>;
 }
 def MEMSET  : LampInstRdRsImm<"memset",  0x16>;
@@ -202,6 +206,7 @@ def INC  : LampInstRd<"inc", 0x37>;
 def PUSH : LampInstRd<"push", 0x08>;
 def POP  : LampInstRd<"pop", 0x09>;
 def INT  : LampInstRd<"int", 0x1A>;
+def INTI : LampInstI<"inti", 0x5C>;
 def IRET : LampInstNone<"iret", 0x1B>;
 def CPUID : LampInstRd<"cpuid", 0x48> { let hasSideEffects = 1; }
 def PAUSE : LampInstNone<"pause", 0x45> { let hasSideEffects = 1; }
@@ -240,6 +245,12 @@ let isTerminator = 1, isBranch = 1 in {
   def JLE  : LampInstTarget<"jle", 0x28> { let Uses = [FLAGS]; }
   def JC   : LampInstTarget<"jc", 0x29> { let Uses = [FLAGS]; }
   def JNC  : LampInstTarget<"jnc", 0x2A> { let Uses = [FLAGS]; }
+  def RJG  : LampInstTarget<"rjg", 0x56> { let Uses = [FLAGS]; }
+  def RJGE : LampInstTarget<"rjge", 0x57> { let Uses = [FLAGS]; }
+  def RJL  : LampInstTarget<"rjl", 0x58> { let Uses = [FLAGS]; }
+  def RJLE : LampInstTarget<"rjle", 0x59> { let Uses = [FLAGS]; }
+  def RJC  : LampInstTarget<"rjc", 0x5A> { let Uses = [FLAGS]; }
+  def RJNC : LampInstTarget<"rjnc", 0x5B> { let Uses = [FLAGS]; }
 }
 
 let isCall = 1 in

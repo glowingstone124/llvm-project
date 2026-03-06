@@ -75,9 +75,13 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) const {
   case Lamp::CALLR: return 0x49;
   case Lamp::RET: return 0x0B;
   case Lamp::LOAD: return 0x0C;
+  case Lamp::LOAD16: return 0x52;
   case Lamp::LOAD32: return 0x0D;
+  case Lamp::LOADS8: return 0x54;
+  case Lamp::LOADS16: return 0x55;
   case Lamp::LOADX32: return 0x0E;
   case Lamp::STORE: return 0x0F;
+  case Lamp::STORE16: return 0x53;
   case Lamp::STORE32: return 0x10;
   case Lamp::STOREX32: return 0x11;
   case Lamp::CMP: return 0x12;
@@ -89,6 +93,7 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) const {
   case Lamp::IN: return 0x18;
   case Lamp::OUT: return 0x19;
   case Lamp::INT: return 0x1A;
+  case Lamp::INTI: return 0x5C;
   case Lamp::IRET: return 0x1B;
   case Lamp::MOD: return 0x1C;
   case Lamp::AND: return 0x1D;
@@ -103,6 +108,12 @@ uint8_t LampMCCodeEmitter::getOpcodeByte(unsigned Opc) const {
   case Lamp::JNZ: return 0x24;
   case Lamp::RJZ: return 0x4C;
   case Lamp::RJNZ: return 0x4D;
+  case Lamp::RJG: return 0x56;
+  case Lamp::RJGE: return 0x57;
+  case Lamp::RJL: return 0x58;
+  case Lamp::RJLE: return 0x59;
+  case Lamp::RJC: return 0x5A;
+  case Lamp::RJNC: return 0x5B;
   case Lamp::JG: return 0x25;
   case Lamp::JGE: return 0x26;
   case Lamp::JL: return 0x27;
@@ -164,6 +175,12 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
   case Lamp::JC:
   case Lamp::JNC:
   case Lamp::RJMP:
+  case Lamp::RJG:
+  case Lamp::RJGE:
+  case Lamp::RJL:
+  case Lamp::RJLE:
+  case Lamp::RJC:
+  case Lamp::RJNC:
     return LampInstForm::Target;
 
   case Lamp::JZ:
@@ -178,6 +195,9 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
   case Lamp::INT:
   case Lamp::CPUID:
     return LampInstForm::Rd;
+
+  case Lamp::INTI:
+    return LampInstForm::I;
 
   case Lamp::MOVI:
     return LampInstForm::RdImm;
@@ -219,7 +239,10 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
     return LampInstForm::RsRs;
 
   case Lamp::LOAD:
+  case Lamp::LOAD16:
   case Lamp::LOAD32:
+  case Lamp::LOADS8:
+  case Lamp::LOADS16:
   case Lamp::MEMSET:
   case Lamp::MEMCPY:
   case Lamp::FLOAD32:
@@ -239,6 +262,7 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
     return LampInstForm::RsImm;
 
   case Lamp::STORE:
+  case Lamp::STORE16:
   case Lamp::STORE32:
   case Lamp::FSTORE32:
   case Lamp::STLR:
@@ -274,6 +298,12 @@ bool LampMCCodeEmitter::isPCRelativeTargetOpcode(unsigned Opc) const {
   case Lamp::RCALL:
   case Lamp::RJZ:
   case Lamp::RJNZ:
+  case Lamp::RJG:
+  case Lamp::RJGE:
+  case Lamp::RJL:
+  case Lamp::RJLE:
+  case Lamp::RJC:
+  case Lamp::RJNC:
     return true;
   default:
     return false;

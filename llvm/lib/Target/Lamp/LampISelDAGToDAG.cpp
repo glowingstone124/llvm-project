@@ -59,29 +59,29 @@ static bool getBranchCondInfo(ISD::CondCode CC, BranchCondInfo &Info) {
     Info.BrOpc = Lamp::RJNZ;
     return true;
   case ISD::SETLT:
-    Info.BrOpc = Lamp::JL;
+    Info.BrOpc = Lamp::RJL;
     return true;
   case ISD::SETLE:
-    Info.BrOpc = Lamp::JLE;
+    Info.BrOpc = Lamp::RJLE;
     return true;
   case ISD::SETGT:
-    Info.BrOpc = Lamp::JG;
+    Info.BrOpc = Lamp::RJG;
     return true;
   case ISD::SETGE:
-    Info.BrOpc = Lamp::JGE;
+    Info.BrOpc = Lamp::RJGE;
     return true;
   case ISD::SETULT:
-    Info.BrOpc = Lamp::JC;
+    Info.BrOpc = Lamp::RJC;
     return true;
   case ISD::SETUGE:
-    Info.BrOpc = Lamp::JNC;
+    Info.BrOpc = Lamp::RJNC;
     return true;
   case ISD::SETUGT:
-    Info.BrOpc = Lamp::JC;
+    Info.BrOpc = Lamp::RJC;
     Info.SwapCompareOperands = true;
     return true;
   case ISD::SETULE:
-    Info.BrOpc = Lamp::JNC;
+    Info.BrOpc = Lamp::RJNC;
     Info.SwapCompareOperands = true;
     return true;
   default:
@@ -458,7 +458,7 @@ void LampDAGToDAGISel::Select(SDNode *N) {
           "PIC relocations are not supported on the Lamp target",
           SDLoc(N).getDebugLoc()));
     }
-    if (GA->getGlobal()->isThreadLocal()) {
+    if (GA->getGlobal()->isThreadLocal() && !TM.useEmulatedTLS()) {
       CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
           CurDAG->getMachineFunction().getFunction(),
           "TLS is not supported on the Lamp target", SDLoc(N).getDebugLoc()));
@@ -675,18 +675,8 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         LD->getMemoryVT() == MVT::i8 && LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
-        SDLoc DL(N);
         SDValue Ops[] = {Base, Offset, LD->getChain()};
-        SDNode *Load8 =
-            CurDAG->getMachineNode(Lamp::LOAD, DL, {MVT::i32, MVT::Other}, Ops);
-        SDValue Bias = CurDAG->getTargetConstant(0x80, DL, MVT::i32);
-        SDNode *Xor = CurDAG->getMachineNode(
-            Lamp::XORI, DL, MVT::i32, SDValue(Load8, 0), Bias);
-        SDNode *Sub = CurDAG->getMachineNode(
-            Lamp::SUBI, DL, MVT::i32, SDValue(Xor, 0), Bias);
-        CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), SDValue(Sub, 0));
-        CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 1), SDValue(Load8, 1));
-        CurDAG->RemoveDeadNode(N);
+        CurDAG->SelectNodeTo(N, Lamp::LOADS8, MVT::i32, MVT::Other, Ops);
         return;
       }
     }
@@ -697,16 +687,8 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         LD->getMemoryVT() == MVT::i8 && LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
-        SDLoc DL(N);
         SDValue Ops[] = {Base, Offset, LD->getChain()};
-        SDNode *Load8 =
-            CurDAG->getMachineNode(Lamp::LOAD, DL, {MVT::i32, MVT::Other}, Ops);
-        SDValue Mask = CurDAG->getTargetConstant(0xff, DL, MVT::i32);
-        SDNode *Masked = CurDAG->getMachineNode(
-            Lamp::ANDI, DL, MVT::i32, SDValue(Load8, 0), Mask);
-        CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), SDValue(Masked, 0));
-        CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 1), SDValue(Load8, 1));
-        CurDAG->RemoveDeadNode(N);
+        CurDAG->SelectNodeTo(N, Lamp::LOAD, MVT::i32, MVT::Other, Ops);
         return;
       }
     }
@@ -717,6 +699,15 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         LD->getMemoryVT() == MVT::i16 && LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
+        if (LD->getAlign().value() >= 2) {
+          SDValue Ops[] = {Base, Offset, LD->getChain()};
+          unsigned Opc = LD->getExtensionType() == ISD::SEXTLOAD
+                             ? Lamp::LOADS16
+                             : Lamp::LOAD16;
+          CurDAG->SelectNodeTo(N, Opc, MVT::i32, MVT::Other, Ops);
+          return;
+        }
+
         SDLoc DL(N);
         int64_t Off = 0;
         if (auto *CN = dyn_cast<ConstantSDNode>(Offset))
@@ -817,6 +808,12 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         SDLoc DL(N);
         Base = materializeGPROp(Base, DL);
         SDValue Val = materializeStoreVal(ST->getValue(), DL);
+
+        if (ST->getAlign().value() >= 2) {
+          SDValue Ops[] = {Val, Base, Offset, ST->getChain()};
+          CurDAG->SelectNodeTo(N, Lamp::STORE16, MVT::Other, Ops);
+          return;
+        }
 
         SDValue LowOps[] = {Val, Base, Offset, ST->getChain()};
         SDNode *LowStore = CurDAG->getMachineNode(Lamp::STORE, DL, MVT::Other,
@@ -1114,7 +1111,7 @@ bool LampDAGToDAGISel::SelectAddr(SDValue Addr, SDValue &Base,
 
     if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr)) {
       if (GA->getGlobal()->isThreadLocal()) {
-        CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+        if (!TM.useEmulatedTLS()) CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
             CurDAG->getMachineFunction().getFunction(),
             "TLS is not supported on the Lamp target", DL.getDebugLoc()));
       }

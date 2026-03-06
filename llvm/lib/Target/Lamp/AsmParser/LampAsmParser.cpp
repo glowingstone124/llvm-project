@@ -347,6 +347,18 @@ bool LampAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &,
     OK = rt(Lamp::JNZ);
   } else if (Mn == "rjnz") {
     OK = rt(Lamp::RJNZ);
+  } else if (Mn == "rjg") {
+    OK = t(Lamp::RJG);
+  } else if (Mn == "rjge") {
+    OK = t(Lamp::RJGE);
+  } else if (Mn == "rjl") {
+    OK = t(Lamp::RJL);
+  } else if (Mn == "rjle") {
+    OK = t(Lamp::RJLE);
+  } else if (Mn == "rjc") {
+    OK = t(Lamp::RJC);
+  } else if (Mn == "rjnc") {
+    OK = t(Lamp::RJNC);
   } else if (Mn == "jg") {
     OK = t(Lamp::JG);
   } else if (Mn == "jge") {
@@ -373,18 +385,28 @@ bool LampAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &,
     OK = r(Lamp::POP);
   } else if (Mn == "int") {
     OK = r(Lamp::INT);
+  } else if (Mn == "inti") {
+    OK = t(Lamp::INTI);
   } else if (Mn == "inc") {
     OK = r(Lamp::INC);
   } else if (Mn == "cpuid") {
     OK = r(Lamp::CPUID);
   } else if (Mn == "store32") {
     OK = rri(Lamp::STORE32);
+  } else if (Mn == "store16") {
+    OK = rri(Lamp::STORE16);
   } else if (Mn == "store") {
     OK = rri(Lamp::STORE);
   } else if (Mn == "storex32") {
     OK = rrri(Lamp::STOREX32);
   } else if (Mn == "load32") {
     OK = rri(Lamp::LOAD32);
+  } else if (Mn == "load16") {
+    OK = rri(Lamp::LOAD16);
+  } else if (Mn == "loads8") {
+    OK = rri(Lamp::LOADS8);
+  } else if (Mn == "loads16") {
+    OK = rri(Lamp::LOADS16);
   } else if (Mn == "load") {
     OK = rri(Lamp::LOAD);
   } else if (Mn == "loadx32") {
