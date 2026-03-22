@@ -19,14 +19,15 @@ entry:
 }
 
 ; CHECK-LABEL: nofp:
-; CHECK: subi r30, r30, 4
+; CHECK: subi r30, r30, 8
 ; CHECK-NOT: mov r31, r30
-; CHECK: addi r30, r30, 4
+; CHECK: addi r30, r30, 8
 ; CHECK: ret
 
 ; CHECK-LABEL: withfp:
-; CHECK: store32 r31, r30, 0
-; CHECK: addi r31, r30, 4
+; CHECK: subi r30, r30, 8
+; CHECK: store32 r31, r30, 4
+; CHECK: addi r31, r30, 8
 ; CHECK: mov r30, r31
 ; CHECK: load32 r31, r30, -4
 ; CHECK: ret

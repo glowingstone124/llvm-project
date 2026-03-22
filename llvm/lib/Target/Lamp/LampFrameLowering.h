@@ -9,7 +9,7 @@ class LampSubtarget;
 class LampFrameLowering : public TargetFrameLowering {
 public:
   explicit LampFrameLowering(const LampSubtarget &STI)
-      : TargetFrameLowering(StackGrowsDown, Align(4), 0) {}
+      : TargetFrameLowering(StackGrowsDown, Align(8), 0) {}
 
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;

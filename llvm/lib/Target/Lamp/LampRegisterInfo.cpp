@@ -6,6 +6,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/Support/MathExtras.h"
 
 #define GET_REGINFO_TARGET_DESC
 #include "LampGenRegisterInfo.inc"
@@ -43,8 +44,13 @@ bool LampRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
   int FI = MI.getOperand(FIOperandNum).getIndex();
   int64_t Offset = MFI.getObjectOffset(FI);
+  const uint64_t StackSize =
+      alignTo(MFI.getStackSize(),
+              MF.getSubtarget().getFrameLowering()->getStackAlign());
   // SP is adjusted in prologue; frame indices are relative to pre-adjusted SP.
-  Offset += MFI.getStackSize();
+  // Round the local allocation to the target stack alignment so frame objects
+  // stay aligned even when the raw object area size is not a multiple of 8.
+  Offset += StackSize;
   Offset += MI.getOperand(FIOperandNum + 1).getImm();
 
   MI.getOperand(FIOperandNum).ChangeToRegister(getFrameRegister(MF), false);
