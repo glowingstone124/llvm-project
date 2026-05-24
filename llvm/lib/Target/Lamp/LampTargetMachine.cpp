@@ -2,6 +2,8 @@
 #include "Lamp.h"
 #include "LampMachineFunctionInfo.h"
 #include "TargetInfo/LAMPTargetInfo.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -42,6 +44,25 @@ LampTargetMachine::LampTargetMachine(const Target &T, const Triple &TT,
 LampTargetMachine::~LampTargetMachine() = default;
 
 namespace {
+class LampTTIImpl final : public BasicTTIImplBase<LampTTIImpl> {
+  using BaseT = BasicTTIImplBase<LampTTIImpl>;
+  friend BaseT;
+  const LampSubtarget *ST;
+  const LampTargetLowering *TLI;
+
+  const LampSubtarget *getST() const { return ST; }
+  const LampTargetLowering *getTLI() const { return TLI; }
+
+public:
+  explicit LampTTIImpl(const LampTargetMachine *TM, const Function &F)
+      : BaseT(TM, F.getDataLayout()), ST(TM->getSubtargetImpl(F)),
+        TLI(ST->getTargetLowering()) {}
+
+  uint64_t getMaxMemIntrinsicInlineSizeThreshold() const override {
+    return 4096;
+  }
+};
+
 class LampPassConfig : public TargetPassConfig {
 public:
   LampPassConfig(LampTargetMachine &TM, PassManagerBase &PM)
@@ -66,6 +87,11 @@ public:
 
 TargetPassConfig *LampTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new LampPassConfig(*this, PM);
+}
+
+TargetTransformInfo
+LampTargetMachine::getTargetTransformInfo(const Function &F) const {
+  return TargetTransformInfo(std::make_unique<LampTTIImpl>(this, F));
 }
 
 MachineFunctionInfo *LampTargetMachine::createMachineFunctionInfo(

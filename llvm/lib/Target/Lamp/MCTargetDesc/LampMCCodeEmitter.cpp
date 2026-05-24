@@ -243,8 +243,6 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
   case Lamp::LOAD32:
   case Lamp::LOADS8:
   case Lamp::LOADS16:
-  case Lamp::MEMSET:
-  case Lamp::MEMCPY:
   case Lamp::FLOAD32:
   case Lamp::ADDI:
   case Lamp::SUBI:
@@ -264,6 +262,8 @@ LampInstForm LampMCCodeEmitter::getInstForm(unsigned Opc) const {
   case Lamp::STORE:
   case Lamp::STORE16:
   case Lamp::STORE32:
+  case Lamp::MEMSET:
+  case Lamp::MEMCPY:
   case Lamp::FSTORE32:
   case Lamp::STLR:
   case Lamp::STARTAP:

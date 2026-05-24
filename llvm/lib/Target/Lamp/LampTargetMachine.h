@@ -2,6 +2,7 @@
 #define LLVM_LIB_TARGET_LAMP_LAMPTARGETMACHINE_H
 
 #include "LampSubtarget.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
 #include "llvm/Support/Allocator.h"
 #include <optional>
@@ -30,6 +31,7 @@ public:
   }
 
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+  TargetTransformInfo getTargetTransformInfo(const Function &F) const override;
   MachineFunctionInfo *
   createMachineFunctionInfo(BumpPtrAllocator &Allocator, const Function &F,
                             const TargetSubtargetInfo *STI) const override;

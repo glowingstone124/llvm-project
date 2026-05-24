@@ -44,14 +44,14 @@ class LampInstRsTarget<string Mn, bits<8> Op> : LampInstBase {
 
 class LampCallInst<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs);
-  let InOperandList = (ins brtarget:$target);
+  let InOperandList = (ins brtarget:$target, variable_ops);
   let AsmString = !strconcat(Mn, " $target");
   let Inst{63-56} = Op;
 }
 
 class LampCallRegInst<string Mn, bits<8> Op> : LampInstBase {
   let OutOperandList = (outs);
-  let InOperandList = (ins GPR:$rs);
+  let InOperandList = (ins GPR:$rs, variable_ops);
   let AsmString = !strconcat(Mn, " $rs");
   let Inst{63-56} = Op;
 }
@@ -173,8 +173,10 @@ let mayStore = 1 in {
   def STORE16 : LampInstRsRsImm<"store16", 0x53>;
   def STORE32 : LampInstRsRsImm<"store32", 0x10>;
 }
-def MEMSET  : LampInstRdRsImm<"memset",  0x16>;
-def MEMCPY  : LampInstRdRsImm<"memcpy",  0x17>;
+let mayStore = 1, hasSideEffects = 1 in
+  def MEMSET : LampInstRsRsImm<"memset", 0x16>;
+let mayLoad = 1, mayStore = 1, hasSideEffects = 1 in
+  def MEMCPY : LampInstRsRsImm<"memcpy", 0x17>;
 def FLOAD32 : LampInstRdRsImm<"fload32", 0x35>;
 def FSTORE32: LampInstRdRsImm<"fstore32",0x36>;
 def ADDI    : LampInstRdRsImm<"addi",    0x38>;
@@ -228,13 +230,17 @@ let isTerminator = 1, isBarrier = 1 in {
   def HALT : LampInstNone<"halt", 0x05>;
   let isReturn = 1 in
   def RET  : LampInstNone<"ret", 0x0B> {
+    // The ABI returns i32/pointers in R0. Model that implicit use so the
+    // CopyToReg emitted by LowerReturn is live through the terminator.
     let Uses = [R0];
   }
 }
 
 let isTerminator = 1, isBranch = 1 in {
-  def JMP  : LampInstTarget<"jmp", 0x06>;
-  def RJMP : LampInstTarget<"rjmp", 0x4A>;
+  let isBarrier = 1 in {
+    def JMP  : LampInstTarget<"jmp", 0x06>;
+    def RJMP : LampInstTarget<"rjmp", 0x4A>;
+  }
   def JZ   : LampInstRsTarget<"jz", 0x07> { let Uses = [FLAGS]; }
   def RJZ  : LampInstRsTarget<"rjz", 0x4C> { let Uses = [FLAGS]; }
   def JNZ  : LampInstRsTarget<"jnz", 0x24> { let Uses = [FLAGS]; }
@@ -255,7 +261,6 @@ let isTerminator = 1, isBranch = 1 in {
 
 let isCall = 1 in
 def CALL : LampCallInst<"call", 0x0A> {
-  let Uses = [R0, R1, R2, R3, R4, R5, R6, R7];
   // Model call as clobbering caller-saved GPRs and condition flags.
   let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
               R8, R9, R10, R11, R12, R13, R14, R15,
@@ -265,7 +270,6 @@ def CALL : LampCallInst<"call", 0x0A> {
 
 let isCall = 1 in
 def RCALL : LampCallInst<"rcall", 0x4B> {
-  let Uses = [R0, R1, R2, R3, R4, R5, R6, R7];
   let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
               R8, R9, R10, R11, R12, R13, R14, R15,
               R16, R17, R18, R19, R20, R21, R22, R23,
@@ -274,7 +278,6 @@ def RCALL : LampCallInst<"rcall", 0x4B> {
 
 let isCall = 1 in
 def CALLR : LampCallRegInst<"callr", 0x49> {
-  let Uses = [R0, R1, R2, R3, R4, R5, R6, R7];
   let Defs = [R0, R1, R2, R3, R4, R5, R6, R7,
               R8, R9, R10, R11, R12, R13, R14, R15,
               R16, R17, R18, R19, R20, R21, R22, R23,
@@ -327,3 +330,4 @@ def : Pat<(setne i32:$lhs, i32:$rhs),
               (SUB GPR:$lhs, GPR:$rhs),
               (SUB (MOVI 0), (SUB GPR:$lhs, GPR:$rhs))),
             31)>;
+

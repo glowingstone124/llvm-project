@@ -210,83 +210,6 @@ void LampDAGToDAGISel::Select(SDNode *N) {
       return SDValue(Sub, 0);
     }
 
-    if (auto *LD = dyn_cast<LoadSDNode>(V)) {
-      if (!LD->isIndexed()) {
-        SDValue Base, Offset;
-        if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
-          Base = materializeGPROp(Base, DL);
-
-          if (LD->getMemoryVT() == MVT::i32 &&
-              LD->getValueType(0) == MVT::i32) {
-            SDValue Ops[] = {Base, Offset, LD->getChain()};
-            SDNode *Load32 = CurDAG->getMachineNode(
-                Lamp::LOAD32, DL, {MVT::i32, MVT::Other}, Ops);
-            return SDValue(Load32, 0);
-          }
-
-          if ((LD->getExtensionType() == ISD::NON_EXTLOAD ||
-               LD->getExtensionType() == ISD::ZEXTLOAD ||
-               LD->getExtensionType() == ISD::EXTLOAD ||
-               LD->getExtensionType() == ISD::SEXTLOAD) &&
-              LD->getMemoryVT() == MVT::i8 &&
-              LD->getValueType(0) == MVT::i32) {
-            SDValue Ops[] = {Base, Offset, LD->getChain()};
-            SDNode *Load8 = CurDAG->getMachineNode(
-                Lamp::LOAD, DL, {MVT::i32, MVT::Other}, Ops);
-            if (LD->getExtensionType() == ISD::SEXTLOAD) {
-              SDValue Bias = CurDAG->getTargetConstant(0x80, DL, MVT::i32);
-              SDNode *Xor = CurDAG->getMachineNode(
-                  Lamp::XORI, DL, MVT::i32, SDValue(Load8, 0), Bias);
-              SDNode *Sub = CurDAG->getMachineNode(
-                  Lamp::SUBI, DL, MVT::i32, SDValue(Xor, 0), Bias);
-              return SDValue(Sub, 0);
-            }
-            // Keep byte loads deterministic in i32 regs.
-            SDValue Mask = CurDAG->getTargetConstant(0xff, DL, MVT::i32);
-            SDNode *Masked = CurDAG->getMachineNode(
-                Lamp::ANDI, DL, MVT::i32, SDValue(Load8, 0), Mask);
-            return SDValue(Masked, 0);
-          }
-
-          if ((LD->getExtensionType() == ISD::ZEXTLOAD ||
-               LD->getExtensionType() == ISD::EXTLOAD ||
-               LD->getExtensionType() == ISD::SEXTLOAD) &&
-              LD->getMemoryVT() == MVT::i16 &&
-              LD->getValueType(0) == MVT::i32) {
-            int64_t Off = 0;
-            if (auto *CN = dyn_cast<ConstantSDNode>(Offset))
-              Off = CN->getSExtValue();
-
-            SDValue LowOps[] = {Base, Offset, LD->getChain()};
-            SDNode *LowLoad = CurDAG->getMachineNode(
-                Lamp::LOAD, DL, {MVT::i32, MVT::Other}, LowOps);
-
-            SDValue Offset1 =
-                CurDAG->getSignedTargetConstant(Off + 1, DL, MVT::i32);
-            SDValue HighOps[] = {Base, Offset1, SDValue(LowLoad, 1)};
-            SDNode *HighLoad = CurDAG->getMachineNode(
-                Lamp::LOAD, DL, {MVT::i32, MVT::Other}, HighOps);
-
-            SDValue ShiftImm = CurDAG->getTargetConstant(8, DL, MVT::i32);
-            SDNode *HighShift = CurDAG->getMachineNode(
-                Lamp::SHLI, DL, MVT::i32, SDValue(HighLoad, 0), ShiftImm);
-            SDNode *Merged = CurDAG->getMachineNode(
-                Lamp::OR, DL, MVT::i32, SDValue(LowLoad, 0),
-                SDValue(HighShift, 0));
-            if (LD->getExtensionType() == ISD::SEXTLOAD) {
-              SDValue Bias = CurDAG->getTargetConstant(0x8000, DL, MVT::i32);
-              SDNode *Xor = CurDAG->getMachineNode(
-                  Lamp::XORI, DL, MVT::i32, SDValue(Merged, 0), Bias);
-              SDNode *Sub = CurDAG->getMachineNode(
-                  Lamp::SUBI, DL, MVT::i32, SDValue(Xor, 0), Bias);
-              return SDValue(Sub, 0);
-            }
-            return SDValue(Merged, 0);
-          }
-        }
-      }
-    }
-
     if (V.getOpcode() == ISD::ADD) {
       SDValue L = materializeGPROp(V.getOperand(0), DL);
       SDValue R = V.getOperand(1);
@@ -402,6 +325,94 @@ void LampDAGToDAGISel::Select(SDNode *N) {
       return CurDAG->getNode(ISD::ZERO_EXTEND, DL, MVT::i32, V);
 
     return V;
+  };
+
+  auto emitSetCCBool = [&](ISD::CondCode CCCode, SDValue LHS, SDValue RHS,
+                           SDLoc DL) -> SDValue {
+    LHS = materializeGPROp(LHS, DL);
+    RHS = materializeGPROp(RHS, DL);
+    if (LHS.getValueType() != MVT::i32)
+      LHS = CurDAG->getZExtOrTrunc(LHS, DL, MVT::i32);
+    if (RHS.getValueType() != MVT::i32)
+      RHS = CurDAG->getZExtOrTrunc(RHS, DL, MVT::i32);
+
+    auto emitSub = [&](SDValue A, SDValue B) -> SDValue {
+      SDNode *Sub = CurDAG->getMachineNode(Lamp::SUB, DL, MVT::i32, A, B);
+      return SDValue(Sub, 0);
+    };
+    auto emitXorImm = [&](SDValue V, int64_t Imm) -> SDValue {
+      SDValue I = CurDAG->getSignedTargetConstant(Imm, DL, MVT::i32);
+      SDNode *X = CurDAG->getMachineNode(Lamp::XORI, DL, MVT::i32, V, I);
+      return SDValue(X, 0);
+    };
+    auto emitShr31 = [&](SDValue V) -> SDValue {
+      SDValue ShiftImm = CurDAG->getTargetConstant(31, DL, MVT::i32);
+      SDNode *S = CurDAG->getMachineNode(Lamp::SHRI, DL, MVT::i32, V, ShiftImm);
+      return SDValue(S, 0);
+    };
+    auto emitInvert01 = [&](SDValue V) -> SDValue {
+      return emitXorImm(V, 1);
+    };
+
+    std::function<SDValue(SDValue, SDValue)> emitUnsignedLT =
+        [&](SDValue X, SDValue Y) -> SDValue {
+      SDValue D = emitSub(X, Y);
+      SDValue NX = emitXorImm(X, -1);
+      SDNode *XYNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, X, Y);
+      SDValue NXY = emitXorImm(SDValue(XYNode, 0), -1);
+      SDNode *T1Node = CurDAG->getMachineNode(Lamp::AND, DL, MVT::i32, NX, Y);
+      SDNode *T2Node = CurDAG->getMachineNode(Lamp::AND, DL, MVT::i32, NXY, D);
+      SDNode *OrNode = CurDAG->getMachineNode(Lamp::OR, DL, MVT::i32,
+                                              SDValue(T1Node, 0),
+                                              SDValue(T2Node, 0));
+      return emitShr31(SDValue(OrNode, 0));
+    };
+
+    std::function<SDValue(SDValue, SDValue)> emitSignedLT =
+        [&](SDValue X, SDValue Y) -> SDValue {
+      SDValue D = emitSub(X, Y);
+      SDNode *XYNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, X, Y);
+      SDNode *XDNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, X, D);
+      SDNode *AndNode = CurDAG->getMachineNode(Lamp::AND, DL, MVT::i32,
+                                               SDValue(XYNode, 0),
+                                               SDValue(XDNode, 0));
+      SDNode *XorNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, D,
+                                               SDValue(AndNode, 0));
+      return emitShr31(SDValue(XorNode, 0));
+    };
+
+    switch (CCCode) {
+    case ISD::SETEQ:
+    case ISD::SETNE: {
+      SDValue Diff = emitSub(LHS, RHS);
+      SDValue ZeroImm = CurDAG->getTargetConstant(0, DL, MVT::i32);
+      SDNode *Zero = CurDAG->getMachineNode(Lamp::MOVI, DL, MVT::i32, ZeroImm);
+      SDNode *Neg = CurDAG->getMachineNode(Lamp::SUB, DL, MVT::i32,
+                                           SDValue(Zero, 0), Diff);
+      SDNode *Or = CurDAG->getMachineNode(Lamp::OR, DL, MVT::i32, Diff,
+                                          SDValue(Neg, 0));
+      SDValue Res = emitShr31(SDValue(Or, 0));
+      return CCCode == ISD::SETEQ ? emitInvert01(Res) : Res;
+    }
+    case ISD::SETULT:
+      return emitUnsignedLT(LHS, RHS);
+    case ISD::SETUGT:
+      return emitUnsignedLT(RHS, LHS);
+    case ISD::SETULE:
+      return emitInvert01(emitUnsignedLT(RHS, LHS));
+    case ISD::SETUGE:
+      return emitInvert01(emitUnsignedLT(LHS, RHS));
+    case ISD::SETLT:
+      return emitSignedLT(LHS, RHS);
+    case ISD::SETGT:
+      return emitSignedLT(RHS, LHS);
+    case ISD::SETLE:
+      return emitInvert01(emitSignedLT(RHS, LHS));
+    case ISD::SETGE:
+      return emitInvert01(emitSignedLT(LHS, RHS));
+    default:
+      return SDValue();
+    }
   };
 
   if (N->getOpcode() == ISD::SIGN_EXTEND ||
@@ -525,103 +536,9 @@ void LampDAGToDAGISel::Select(SDNode *N) {
   if (N->getOpcode() == ISD::SETCC) {
     SDLoc DL(N);
     auto *CC = cast<CondCodeSDNode>(N->getOperand(2));
-    ISD::CondCode CCCode = CC->get();
-
-    SDValue LHS = materializeGPROp(N->getOperand(0), DL);
-    SDValue RHS = materializeGPROp(N->getOperand(1), DL);
-    if (LHS.getValueType() != MVT::i32)
-      LHS = CurDAG->getZExtOrTrunc(LHS, DL, MVT::i32);
-    if (RHS.getValueType() != MVT::i32)
-      RHS = CurDAG->getZExtOrTrunc(RHS, DL, MVT::i32);
-
-    auto emitSub = [&](SDValue A, SDValue B) -> SDValue {
-      SDNode *Sub = CurDAG->getMachineNode(Lamp::SUB, DL, MVT::i32, A, B);
-      return SDValue(Sub, 0);
-    };
-    auto emitXorImm = [&](SDValue V, int64_t Imm) -> SDValue {
-      SDValue I = CurDAG->getSignedTargetConstant(Imm, DL, MVT::i32);
-      SDNode *X = CurDAG->getMachineNode(Lamp::XORI, DL, MVT::i32, V, I);
-      return SDValue(X, 0);
-    };
-    auto emitShr31 = [&](SDValue V) -> SDValue {
-      SDValue ShiftImm = CurDAG->getTargetConstant(31, DL, MVT::i32);
-      SDNode *S = CurDAG->getMachineNode(Lamp::SHRI, DL, MVT::i32, V, ShiftImm);
-      return SDValue(S, 0);
-    };
-    auto emitInvert01 = [&](SDValue V) -> SDValue {
-      return emitXorImm(V, 1);
-    };
-
-    std::function<SDValue(SDValue, SDValue)> emitUnsignedLT =
-        [&](SDValue X, SDValue Y) -> SDValue {
-      // ltu(x, y) = ((~x & y) | (~(x ^ y) & (x - y))) >> 31
-      SDValue D = emitSub(X, Y);
-      SDValue NX = emitXorImm(X, -1);
-      SDNode *XYNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, X, Y);
-      SDValue NXY = emitXorImm(SDValue(XYNode, 0), -1);
-      SDNode *T1Node = CurDAG->getMachineNode(Lamp::AND, DL, MVT::i32, NX, Y);
-      SDNode *T2Node = CurDAG->getMachineNode(Lamp::AND, DL, MVT::i32, NXY, D);
-      SDNode *OrNode = CurDAG->getMachineNode(Lamp::OR, DL, MVT::i32,
-                                              SDValue(T1Node, 0),
-                                              SDValue(T2Node, 0));
-      return emitShr31(SDValue(OrNode, 0));
-    };
-
-    std::function<SDValue(SDValue, SDValue)> emitSignedLT =
-        [&](SDValue X, SDValue Y) -> SDValue {
-      // slt(x, y) = ((d ^ ((x ^ y) & (x ^ d))) >> 31), d = x - y
-      SDValue D = emitSub(X, Y);
-      SDNode *XYNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, X, Y);
-      SDNode *XDNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, X, D);
-      SDNode *AndNode = CurDAG->getMachineNode(Lamp::AND, DL, MVT::i32,
-                                               SDValue(XYNode, 0),
-                                               SDValue(XDNode, 0));
-      SDNode *XorNode = CurDAG->getMachineNode(Lamp::XOR, DL, MVT::i32, D,
-                                               SDValue(AndNode, 0));
-      return emitShr31(SDValue(XorNode, 0));
-    };
-
-    SDValue Res;
-    switch (CCCode) {
-    case ISD::SETEQ:
-    case ISD::SETNE: {
-      SDValue Diff = emitSub(LHS, RHS);
-      SDValue ZeroImm = CurDAG->getTargetConstant(0, DL, MVT::i32);
-      SDNode *Zero = CurDAG->getMachineNode(Lamp::MOVI, DL, MVT::i32, ZeroImm);
-      SDNode *Neg = CurDAG->getMachineNode(Lamp::SUB, DL, MVT::i32,
-                                           SDValue(Zero, 0), Diff);
-      SDNode *Or = CurDAG->getMachineNode(Lamp::OR, DL, MVT::i32, Diff,
-                                          SDValue(Neg, 0));
-      Res = emitShr31(SDValue(Or, 0));
-      if (CCCode == ISD::SETEQ)
-        Res = emitInvert01(Res);
-      break;
-    }
-    case ISD::SETULT:
-      Res = emitUnsignedLT(LHS, RHS);
-      break;
-    case ISD::SETUGT:
-      Res = emitUnsignedLT(RHS, LHS);
-      break;
-    case ISD::SETULE:
-      Res = emitInvert01(emitUnsignedLT(RHS, LHS));
-      break;
-    case ISD::SETUGE:
-      Res = emitInvert01(emitUnsignedLT(LHS, RHS));
-      break;
-    case ISD::SETLT:
-      Res = emitSignedLT(LHS, RHS);
-      break;
-    case ISD::SETGT:
-      Res = emitSignedLT(RHS, LHS);
-      break;
-    case ISD::SETLE:
-      Res = emitInvert01(emitSignedLT(RHS, LHS));
-      break;
-    case ISD::SETGE:
-      Res = emitInvert01(emitSignedLT(LHS, RHS));
-      break;
-    default:
+    SDValue Res =
+        emitSetCCBool(CC->get(), N->getOperand(0), N->getOperand(1), DL);
+    if (!Res.getNode()) {
       SelectCode(N);
       return;
     }
@@ -684,7 +601,8 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         (LD->getExtensionType() == ISD::NON_EXTLOAD ||
          LD->getExtensionType() == ISD::ZEXTLOAD ||
          LD->getExtensionType() == ISD::EXTLOAD) &&
-        LD->getMemoryVT() == MVT::i8 && LD->getValueType(0) == MVT::i32) {
+        (LD->getMemoryVT() == MVT::i8 || LD->getMemoryVT() == MVT::i1) &&
+        LD->getValueType(0) == MVT::i32) {
       SDValue Base, Offset;
       if (SelectAddr(LD->getBasePtr(), Base, Offset)) {
         SDValue Ops[] = {Base, Offset, LD->getChain()};
@@ -860,6 +778,16 @@ void LampDAGToDAGISel::Select(SDNode *N) {
       }
     }
 
+    {
+      SDLoc DL(N);
+      SDValue Cond = emitSetCCBool(CCCode, LHS, RHS, DL);
+      if (Cond.getNode()) {
+        SDValue Ops[] = {Cond, Dest, Chain};
+        CurDAG->SelectNodeTo(N, Lamp::RJNZ, MVT::Other, Ops);
+        return;
+      }
+    }
+
     BranchCondInfo Info;
     if (getBranchCondInfo(CCCode, Info)) {
       SDLoc DL(N);
@@ -940,6 +868,18 @@ void LampDAGToDAGISel::Select(SDNode *N) {
         if (Swapped != ISD::SETCC_INVALID) {
           CCCode = Swapped;
           std::swap(LHS, RHS);
+        }
+      }
+
+      {
+        SDLoc DL(N);
+        SDValue Dest = N->getOperand(2);
+        SDValue Chain = N->getOperand(0);
+        SDValue BoolCond = emitSetCCBool(CCCode, LHS, RHS, DL);
+        if (BoolCond.getNode()) {
+          SDValue Ops[] = {BoolCond, Dest, Chain};
+          CurDAG->SelectNodeTo(N, Lamp::RJNZ, MVT::Other, Ops);
+          return;
         }
       }
 
@@ -1025,18 +965,38 @@ void LampDAGToDAGISel::Select(SDNode *N) {
   }
 
   if (N->getOpcode() == LampISD::CALL) {
-    SmallVector<SDValue, 4> Ops;
+    SmallVector<SDValue, 8> Ops;
     Ops.push_back(N->getOperand(1));
+    unsigned NumOps = N->getNumOperands();
+    bool HasGlue = NumOps > 0 && N->getOperand(NumOps - 1).getValueType() == MVT::Glue;
+    unsigned ArgEnd = HasGlue ? NumOps - 1 : NumOps;
+    for (unsigned I = 2; I < ArgEnd; ++I)
+      Ops.push_back(N->getOperand(I));
     Ops.push_back(N->getOperand(0));
-    CurDAG->SelectNodeTo(N, Lamp::RCALL, MVT::Other, Ops);
+    if (HasGlue) {
+      Ops.push_back(N->getOperand(NumOps - 1));
+      CurDAG->SelectNodeTo(N, Lamp::RCALL, MVT::Other, MVT::Glue, Ops);
+    } else {
+      CurDAG->SelectNodeTo(N, Lamp::RCALL, MVT::Other, Ops);
+    }
     return;
   }
 
   if (N->getOpcode() == LampISD::CALLR) {
-    SmallVector<SDValue, 4> Ops;
+    SmallVector<SDValue, 8> Ops;
     Ops.push_back(N->getOperand(1));
+    unsigned NumOps = N->getNumOperands();
+    bool HasGlue = NumOps > 0 && N->getOperand(NumOps - 1).getValueType() == MVT::Glue;
+    unsigned ArgEnd = HasGlue ? NumOps - 1 : NumOps;
+    for (unsigned I = 2; I < ArgEnd; ++I)
+      Ops.push_back(N->getOperand(I));
     Ops.push_back(N->getOperand(0));
-    CurDAG->SelectNodeTo(N, Lamp::CALLR, MVT::Other, Ops);
+    if (HasGlue) {
+      Ops.push_back(N->getOperand(NumOps - 1));
+      CurDAG->SelectNodeTo(N, Lamp::CALLR, MVT::Other, MVT::Glue, Ops);
+    } else {
+      CurDAG->SelectNodeTo(N, Lamp::CALLR, MVT::Other, Ops);
+    }
     return;
   }
 

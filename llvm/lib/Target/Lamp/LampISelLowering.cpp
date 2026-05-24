@@ -139,12 +139,21 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
     setOperationAction(ISD::BR_CC, VT, Promote);
     setOperationAction(ISD::SELECT_CC, VT, Promote);
   }
+  // Force compare-and-branch expansion through SETCC/BRCOND. This avoids
+  // depending on flag-based unsigned branch lowering for address-range tests.
+  setOperationAction(ISD::BR_CC, MVT::i32, Expand);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
   // We only have low-part integer multiply in hardware.
   setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::MULHU, MVT::i32, Custom);
   setOperationAction(ISD::MULHS, MVT::i32, Custom);
+  setOperationAction(ISD::SHL, MVT::i64, LibCall);
+  setOperationAction(ISD::SRL, MVT::i64, LibCall);
+  setOperationAction(ISD::SRA, MVT::i64, LibCall);
+  setOperationAction(ISD::SHL_PARTS, MVT::i32, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i32, Expand);
+  setOperationAction(ISD::SRA_PARTS, MVT::i32, Expand);
   setOperationAction(ISD::ROTL, MVT::i32, Legal);
   setOperationAction(ISD::ROTR, MVT::i32, Legal);
   // Lamp has no native funnel-shift instructions.
@@ -152,6 +161,10 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   for (MVT VT : {MVT::i8, MVT::i16, MVT::i32}) {
     setOperationAction(ISD::FSHL, VT, Expand);
     setOperationAction(ISD::FSHR, VT, Expand);
+    setOperationAction(ISD::BSWAP, VT, Expand);
+    setOperationAction(ISD::CTPOP, VT, Expand);
+    setOperationAction(ISD::CTTZ, VT, Expand);
+    setOperationAction(ISD::CTLZ, VT, Expand);
   }
 
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
@@ -168,8 +181,17 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Custom);
   setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+  setLibcallImpl(RTLIB::FPEXT_F32_F64, RTLIB::impl___extendsfdf2);
+  setLibcallImpl(RTLIB::SHL_I64, RTLIB::impl___ashldi3);
+  setLibcallImpl(RTLIB::SRL_I64, RTLIB::impl___lshrdi3);
+  setLibcallImpl(RTLIB::SRA_I64, RTLIB::impl___ashrdi3);
+  MaxStoresPerMemcpy = MaxStoresPerMemcpyOptSize = 0;
+  MaxStoresPerMemset = MaxStoresPerMemsetOptSize = 0;
   computeRegisterProperties(STI.getRegisterInfo());
+  setSchedulingPreference(Sched::Source);
   setStackPointerRegisterToSaveRestore(Lamp::R30);
+  setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
+  setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
   setBooleanContents(ZeroOrOneBooleanContent);
   // Lamp has no indirect branch instruction, so force switch lowering away
   // from jump tables.
@@ -177,6 +199,8 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
 
   // `lamp-unknown-unknown` has no predefined runtime set; wire up the
   // integer div/rem libcalls to compiler-rt entry points.
+  if (getLibcallImpl(RTLIB::MUL_I64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::MUL_I64, RTLIB::impl___muldi3);
   if (getLibcallImpl(RTLIB::UDIV_I64) == RTLIB::Unsupported)
     setLibcallImpl(RTLIB::UDIV_I64, RTLIB::impl___udivdi3);
   if (getLibcallImpl(RTLIB::UREM_I64) == RTLIB::Unsupported)
@@ -185,6 +209,34 @@ LampTargetLowering::LampTargetLowering(const LampTargetMachine &TM,
     setLibcallImpl(RTLIB::SDIV_I64, RTLIB::impl___divdi3);
   if (getLibcallImpl(RTLIB::SREM_I64) == RTLIB::Unsupported)
     setLibcallImpl(RTLIB::SREM_I64, RTLIB::impl___moddi3);
+  if (getLibcallImpl(RTLIB::FPTOSINT_F64_I64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::FPTOSINT_F64_I64, RTLIB::impl___fixdfdi);
+  if (getLibcallImpl(RTLIB::FPTOUINT_F64_I64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::FPTOUINT_F64_I64, RTLIB::impl___fixunsdfdi);
+  if (getLibcallImpl(RTLIB::SINTTOFP_I64_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::SINTTOFP_I64_F64, RTLIB::impl___floatdidf);
+  if (getLibcallImpl(RTLIB::UINTTOFP_I64_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::UINTTOFP_I64_F64, RTLIB::impl___floatundidf);
+  if (getLibcallImpl(RTLIB::FPEXT_F64_F128) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::FPEXT_F64_F128, RTLIB::Unsupported);
+  if (getLibcallImpl(RTLIB::FPROUND_F64_F32) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::FPROUND_F64_F32, RTLIB::impl___truncdfsf2);
+  if (getLibcallImpl(RTLIB::FPTOSINT_F64_I32) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::FPTOSINT_F64_I32, RTLIB::impl___fixdfsi);
+  if (getLibcallImpl(RTLIB::FPTOUINT_F64_I32) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::FPTOUINT_F64_I32, RTLIB::impl___fixunsdfsi);
+  if (getLibcallImpl(RTLIB::SINTTOFP_I32_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::SINTTOFP_I32_F64, RTLIB::impl___floatsidf);
+  if (getLibcallImpl(RTLIB::UINTTOFP_I32_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::UINTTOFP_I32_F64, RTLIB::impl___floatunsidf);
+  if (getLibcallImpl(RTLIB::ADD_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::ADD_F64, RTLIB::impl___adddf3);
+  if (getLibcallImpl(RTLIB::SUB_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::SUB_F64, RTLIB::impl___subdf3);
+  if (getLibcallImpl(RTLIB::MUL_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::MUL_F64, RTLIB::impl___muldf3);
+  if (getLibcallImpl(RTLIB::DIV_F64) == RTLIB::Unsupported)
+    setLibcallImpl(RTLIB::DIV_F64, RTLIB::impl___divdf3);
 }
 
 SDValue LampTargetLowering::LowerOperation(SDValue Op,
@@ -354,12 +406,14 @@ SDValue LampTargetLowering::LowerCall(
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
   SDValue StackPtr = DAG.getRegister(Lamp::R30, MVT::i32);
   SDValue StackAdj;
+  SDValue AdjustedSP;
+  SDValue Glue;
   if (NumBytes != 0) {
     SDValue SP = DAG.getCopyFromReg(Chain, DL, Lamp::R30, MVT::i32);
     Chain = SP.getValue(1);
     StackAdj = DAG.getIntPtrConstant(NumBytes, DL);
     StackPtr = DAG.getNode(ISD::SUB, DL, MVT::i32, SP, StackAdj);
-    Chain = DAG.getCopyToReg(Chain, DL, Lamp::R30, StackPtr);
+    AdjustedSP = StackPtr;
   }
 
   for (unsigned I = 0; I < ArgLocs.size(); ++I) {
@@ -383,52 +437,14 @@ SDValue LampTargetLowering::LowerCall(
     Chain = DAG.getStore(Chain, DL, Arg, Ptr, MachinePointerInfo());
   }
 
-  for (const auto &[Reg, Val] : RegsToPass) {
-    Chain = DAG.getCopyToReg(Chain, DL, Reg, Val);
+  if (NumBytes != 0) {
+    Chain = DAG.getCopyToReg(Chain, DL, Lamp::R30, AdjustedSP, Glue);
+    Glue = Chain.getValue(1);
   }
 
-  // CALL/RCALL model argument registers R0..R7 as implicit uses.
-  // Seed the ones not used for this call with undef so verifier/liveness
-  // does not observe undefined physical-register uses.
-  bool UsedArgReg[8] = {false, false, false, false,
-                        false, false, false, false};
   for (const auto &[Reg, Val] : RegsToPass) {
-    (void)Val;
-    switch (Reg.id()) {
-    case Lamp::R0:
-      UsedArgReg[0] = true;
-      break;
-    case Lamp::R1:
-      UsedArgReg[1] = true;
-      break;
-    case Lamp::R2:
-      UsedArgReg[2] = true;
-      break;
-    case Lamp::R3:
-      UsedArgReg[3] = true;
-      break;
-    case Lamp::R4:
-      UsedArgReg[4] = true;
-      break;
-    case Lamp::R5:
-      UsedArgReg[5] = true;
-      break;
-    case Lamp::R6:
-      UsedArgReg[6] = true;
-      break;
-    case Lamp::R7:
-      UsedArgReg[7] = true;
-      break;
-    default:
-      break;
-    }
-  }
-  static constexpr unsigned ArgRegs[8] = {Lamp::R0, Lamp::R1, Lamp::R2, Lamp::R3,
-                                          Lamp::R4, Lamp::R5, Lamp::R6, Lamp::R7};
-  for (unsigned I = 0; I < 8; ++I) {
-    if (!UsedArgReg[I]) {
-      Chain = DAG.getCopyToReg(Chain, DL, ArgRegs[I], DAG.getUNDEF(MVT::i32));
-    }
+    Chain = DAG.getCopyToReg(Chain, DL, Reg, Val, Glue);
+    Glue = Chain.getValue(1);
   }
 
   unsigned CallOpc = LampISD::CALL;
@@ -442,18 +458,31 @@ SDValue LampTargetLowering::LowerCall(
     CallOpc = LampISD::CALLR;
   }
 
-  SDVTList NodeTys = DAG.getVTList(MVT::Other);
   SmallVector<SDValue, 16> Ops;
   Ops.push_back(Chain);
   Ops.push_back(Callee);
+  for (const auto &[Reg, Val] : RegsToPass) {
+    (void)Val;
+    Ops.push_back(DAG.getRegister(Reg, MVT::i32));
+  }
+  if (Glue.getNode())
+    Ops.push_back(Glue);
 
-  Chain = DAG.getNode(CallOpc, DL, NodeTys, Ops);
+  SDVTList CallVTs =
+      Glue.getNode() ? DAG.getVTList(MVT::Other, MVT::Glue)
+                     : DAG.getVTList(MVT::Other);
+  SDValue Call = DAG.getNode(CallOpc, DL, CallVTs, Ops);
+  Chain = SDValue(Call.getNode(), 0);
+  if (Glue.getNode())
+    Glue = SDValue(Call.getNode(), 1);
+  else
+    Glue = SDValue();
 
   if (NumBytes != 0) {
-    SDValue SP = DAG.getCopyFromReg(Chain, DL, Lamp::R30, MVT::i32);
-    Chain = SP.getValue(1);
-    SDValue RestoredSP = DAG.getNode(ISD::ADD, DL, MVT::i32, SP, StackAdj);
-    Chain = DAG.getCopyToReg(Chain, DL, Lamp::R30, RestoredSP);
+    SDValue RestoredSP =
+        DAG.getNode(ISD::ADD, DL, MVT::i32, AdjustedSP, StackAdj);
+    Chain = DAG.getCopyToReg(Chain, DL, Lamp::R30, RestoredSP, Glue);
+    Glue = Chain.getValue(1);
   }
 
   SmallVector<CCValAssign, 16> RVLocs;
@@ -462,8 +491,10 @@ SDValue LampTargetLowering::LowerCall(
   RetCCInfo.AnalyzeCallResult(Ins, RetCC_Lamp);
 
   for (CCValAssign &VA : RVLocs) {
-    SDValue Ret = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT());
+    SDValue Ret =
+        DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT(), Glue);
     Chain = Ret.getValue(1);
+    Glue = Ret.getValue(2);
     InVals.push_back(Ret.getValue(0));
   }
 

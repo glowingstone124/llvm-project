@@ -71,8 +71,8 @@ void LampFrameLowering::emitEpilogue(MachineFunction &MF,
 }
 
 bool LampFrameLowering::hasFPImpl(const MachineFunction &MF) const {
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
-  // Calls with outgoing stack arguments temporarily move SP in LowerCall.
-  // Keep frame indices stable by anchoring them to FP in any non-leaf frame.
-  return MFI.hasVarSizedObjects() || MFI.hasCalls();
+  // SP (R30) changes across calls with outgoing stack args, making frame index
+  // offsets inconsistent between pre-call and post-call accesses when R30 is
+  // the frame register. Always use FP (R31) as the stable frame base.
+  return true;
 }
